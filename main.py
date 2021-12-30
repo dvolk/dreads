@@ -31,11 +31,13 @@ class Book(db.Document):
     title = db.StringField()
     filename = db.StringField()
     author = db.StringField()
-
+    last_part = db.IntField(default=1)
+    part_count = db.IntField(default=0)
 
 header = """
 <html>
 <head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
 <style>
@@ -45,6 +47,7 @@ header = """
 a { margin-right: 5px; text-decoration: none }
 a.current { font-weight: bold; }
 </style>
+<title>{{ title }}</title>
 </head>
 """
 
@@ -56,32 +59,25 @@ view_template = (
     header
     + """
 <body>
-<div class="w3-container {{color1}}">
+<div class="w3-container {{ color1 }}">
 <p>
-{% for ch in chs %}
-{% if ch == current_ch %}
-<a class="current" href="/view/{{ book_id }}/{{ ch }}?theme={{ theme }}">&lt;{{ ch }}&gt;</a>
-{% else %}
-<a class="other" href="/view/{{ book_id }}/{{ ch }}?theme={{ theme }}">{{ ch }}</a>
-{% endif %}
-{% endfor %}
-<a href="/?theme={{ theme }}">Index</a>
+{{ book.last_part }} / {{ book.part_count }}
+&nbsp;&nbsp;
+<a href="/view/{{ book.id }}/{{ book.last_part - 1 }}?theme={{ theme }}">Previous</a>
+&nbsp;&nbsp;
+<a href="/view/{{ book.id }}/{{ book.last_part + 1 }}?theme={{ theme }}">Next</a>
+<a style="float:right" href="/?theme={{ theme }}">Exit</a>
 </p>
 </div>
-<div class="w3-container {{color2}} black">
+<div class="w3-container {{ color2 }}">
 {% for p in ps %}
 <p>{{ p }}</p>
 {% endfor %}
 </div>
-<div class="w3-container {{color1}}">
+<div class="w3-container {{ color1 }}">
 <p>
-{% for ch in chs %}
-{% if ch == current_ch %}
-<a class="current" href="/view/{{ ch }}">&lt;{{ ch }}&gt;</a>
-{% else %}
-<a class="other" href="/view/{{ ch }}">{{ ch }}</a>
-{% endif %}
-{% endfor %}
+<a href="/view/{{ book.id }}/{{ book.last_part + 1 }}?theme={{ theme }}">Next</a>
+<a style="float:right" href="/?theme={{ theme }}">Exit</a>
 </p>
 </div>
 </body>
@@ -92,15 +88,20 @@ view_template = (
 index_template = (
     header
     + """
-<div class="w3-container {{color2}}">
-<a href="/reload" style="margin-top: 15px; float: right" class="w3-btn w3-green w3-round"><i class="fa fa-fw fa-refresh"></i> Reload</a>
-<a href="/?theme=dark" style="margin-top: 15px; float: right" class="w3-btn w3-blue w3-round"><i class="fa fa-fw fa-cog"></i> Dark Theme</a>
+<div class="w3-container {{ color2 }}">
+<p>
+{% if theme == "dark" %}
+<a href="/?theme=light" style="margin-top: 10px; float: right" class="w3-btn w3-blue w3-round"><i class="fa fa-fw fa-cog"></i> Light Theme</a>
+{% else %}
+<a href="/?theme=dark" style="margin-top: 10px; float: right" class="w3-btn w3-blue w3-round"><i class="fa fa-fw fa-cog"></i> Dark Theme</a>
+{% endif %}
+</p>
 <h1>Books</h1>
 </div>
-<div class="w3-container {{color2}}">
+<div class="w3-container {{ color2 }}">
 <p>
 {% for book in books %}
-<h4><a href="/view/{{ book.id }}/1?theme={{ theme }}">{{ book.title }}</a><br/><small>{{ book.author }}</small></h4>
+<h4><a href="/view/{{ book.id }}/{{ book.last_part }}?theme={{ theme }}">{{ book.title }}</a><br/><small>{{ book.author }}</small></h4>
 {% endfor %}
 </p>
 </div>
@@ -113,12 +114,15 @@ index_template = (
 @app.route("/")
 def index():
     """Index."""
+    reload_files()
     theme = flask.request.args.get("theme")
     color1, color2 = get_theme(theme)
+    books = Book.objects().order_by("title")
 
     return flask.render_template_string(
         index_template,
-        books=Book.objects().order_by("title"),
+        books=books,
+        title="Catreads",
         color1=color1,
         color2=color2,
         theme=theme,
@@ -128,8 +132,8 @@ def index():
 def reload_files():
     """Reload epubs from disk."""
     disk_books = list(Path("./epub").glob("*.epub"))
+    disk_books_filenames = [x.name for x in disk_books]
     db_books = Book.objects().values_list("filename")
-    print(db_books)
     for disk_book in disk_books:
         if disk_book.name not in db_books:
             print(f"adding {disk_book}")
@@ -138,13 +142,14 @@ def reload_files():
             authors = book.get_metadata("DC", "creator")[0][0]
             b = Book(title=title, filename=disk_book.name, author=authors)
             b.save()
-
-
-@app.route("/reload")
-def reload():
-    """Reload epubs and return to index."""
-    reload_files()
-    return flask.redirect("/")
+    # remove missing books from database
+    books_to_remove = list()
+    for db_book in db_books:
+        if db_book not in disk_books_filenames:
+            print(f"removing missing book: {db_book}")
+            books_to_remove.append(db_book)
+    for book_to_remove in books_to_remove:
+        print(Book.objects(filename=book_to_remove).delete())
 
 
 @app.route("/view/<book_id>/<ch>")
@@ -153,9 +158,9 @@ def view(book_id, ch):
     theme = flask.request.args.get("theme")
     color1, color2 = get_theme(theme)
     ch = int(ch)
-    book_filename = Book.objects(id=book_id).first().filename
-    book = epub.read_epub("epub/" + book_filename)
-    chapters = list(book.get_items())
+    book = Book.objects(id=book_id).first()
+    book_content = epub.read_epub("epub/" + book.filename)
+    chapters = list(book_content.get_items())
     chapter = chapters[ch]
     html = chapter.get_content()
     soup = BeautifulSoup(html, features="lxml")
@@ -163,12 +168,15 @@ def view(book_id, ch):
     for p in soup.find_all("p"):
         ps.append(p.get_text())
 
+    book.last_part = ch
+    book.part_count = len(chapters)
+    book.save()
+
     return flask.render_template_string(
         view_template,
+        book=book,
+        title=book.title,
         ps=ps,
-        book_id=book_id,
-        current_ch=ch,
-        chs=list(range(len(chapters))),
         color1=color1,
         color2=color2,
         theme=theme,
@@ -176,4 +184,4 @@ def view(book_id, ch):
 
 
 if __name__ == "__main__":
-    app.run(port=5438, debug=True)
+    app.run(port=5438)
