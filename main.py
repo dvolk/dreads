@@ -1,4 +1,4 @@
-"""Catread."""
+"""dreads."""
 
 from pathlib import Path
 
@@ -122,7 +122,7 @@ def index():
     return flask.render_template_string(
         index_template,
         books=books,
-        title="Catreads",
+        title="Dreads",
         color1=color1,
         color2=color2,
         theme=theme,
