@@ -1,0 +1,13 @@
+{% extends 'base.jinja2' %}
+{% block content %}
+<body>
+    <h1>Available Books</h1>
+    <ul>
+    {% for book in books %}
+        <li>
+            <a href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
+        </li>
+    {% endfor %}
+    </ul>
+</body>
+{% endblock %}

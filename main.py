@@ -1,187 +1,131 @@
-"""dreads."""
-
-from pathlib import Path
-
+from flask import Flask, render_template, redirect, url_for
+from flask_sqlalchemy import SQLAlchemy
 from ebooklib import epub
-from bs4 import BeautifulSoup
-import flask
-import flask_mongoengine
+import ebooklib
+from bleach import clean, sanitizer
+import os
+
+app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///reader.db"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+db = SQLAlchemy(app)
+
+# Database Models
+class Book(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String, unique=True, nullable=False)
+    title = db.Column(db.String, nullable=False)
+    chapters = db.relationship("Chapter", backref="book", lazy=True)
+    progress = db.relationship("BookProgress", backref="book", uselist=False)
 
 
-app = flask.Flask(__name__)
-app.secret_key = "secret"
-app.config["MONGODB_DB"] = "catread-1"
-db = flask_mongoengine.MongoEngine(app)
+class Chapter(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    index = db.Column(db.Integer, nullable=False)
+    title = db.Column(db.String, nullable=True)
+    content = db.Column(db.Text, nullable=False)
+    book_id = db.Column(db.Integer, db.ForeignKey("book.id"), nullable=False)
 
 
-def get_theme(theme_name):
-    """Toggle between light and dark themes."""
-    if theme_name == "dark":
-        color1 = "w3-gray"
-        color2 = "w3-black"
-    else:
-        color1 = "w3-khaki"
-        color2 = "w3-pale-yellow"
-    return color1, color2
+class BookProgress(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    chapter_index = db.Column(db.Integer, nullable=False)
+    book_id = db.Column(
+        db.Integer, db.ForeignKey("book.id"), nullable=False, unique=True
+    )
 
 
-class Book(db.Document):
-    """Book class."""
+BOOKS_DIR = "./epub"
 
-    title = db.StringField()
-    filename = db.StringField()
-    author = db.StringField()
-    last_part = db.IntField(default=1)
-    part_count = db.IntField(default=0)
 
-header = """
-<html>
-<head>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-<style>
- body, h1, h2, h3, h4, h5, h6 {
-  font-family: Arial, Helvetica, sans-serif;
-}
-a { margin-right: 5px; text-decoration: none }
-a.current { font-weight: bold; }
-</style>
-<title>{{ title }}</title>
-</head>
-"""
+def load_books():
+    existing_filenames = {book.filename for book in Book.query.all()}
+    for filename in os.listdir(BOOKS_DIR):
+        if filename.endswith(".epub") and filename not in existing_filenames:
+            print(f"processing {filename}")
+            book_path = os.path.join(BOOKS_DIR, filename)
+            book_epub = epub.read_epub(book_path)
+            title = (
+                book_epub.get_metadata("DC", "title")[0][0]
+                if book_epub.get_metadata("DC", "title")
+                else "Untitled"
+            )
 
-footer = """
-</html>
-"""
+            # Create a new Book entry
+            new_book = Book(filename=filename, title=title)
+            db.session.add(new_book)
+            db.session.commit()
 
-view_template = (
-    header
-    + """
-<body>
-<div class="w3-container {{ color1 }}">
-<p>
-{{ book.last_part }} / {{ book.part_count }}
-&nbsp;&nbsp;
-<a href="/view/{{ book.id }}/{{ book.last_part - 1 }}?theme={{ theme }}">Previous</a>
-&nbsp;&nbsp;
-<a href="/view/{{ book.id }}/{{ book.last_part + 1 }}?theme={{ theme }}">Next</a>
-<a style="float:right" href="/?theme={{ theme }}">Exit</a>
-</p>
-</div>
-<div class="w3-container {{ color2 }}">
-{% for p in ps %}
-<p>{{ p }}</p>
-{% endfor %}
-</div>
-<div class="w3-container {{ color1 }}">
-<p>
-<a href="/view/{{ book.id }}/{{ book.last_part + 1 }}?theme={{ theme }}">Next</a>
-<a style="float:right" href="/?theme={{ theme }}">Exit</a>
-</p>
-</div>
-</body>
-"""
-    + footer
-)
-
-index_template = (
-    header
-    + """
-<div class="w3-container {{ color2 }}">
-<p>
-{% if theme == "dark" %}
-<a href="/?theme=light" style="margin-top: 10px; float: right" class="w3-btn w3-blue w3-round"><i class="fa fa-fw fa-cog"></i> Light Theme</a>
-{% else %}
-<a href="/?theme=dark" style="margin-top: 10px; float: right" class="w3-btn w3-blue w3-round"><i class="fa fa-fw fa-cog"></i> Dark Theme</a>
-{% endif %}
-</p>
-<h1>Books</h1>
-</div>
-<div class="w3-container {{ color2 }}">
-<p>
-{% for book in books %}
-<h4><a href="/view/{{ book.id }}/{{ book.last_part }}?theme={{ theme }}">{{ book.title }}</a><br/><small>{{ book.author }}</small></h4>
-{% endfor %}
-</p>
-</div>
-</div>
-"""
-    + footer
-)
+            # Extract chapters
+            chapters = [
+                item
+                for item in book_epub.get_items()
+                if item.get_type() == ebooklib.ITEM_DOCUMENT
+            ]
+            allowed_tags = list(sanitizer.ALLOWED_TAGS) + ["p", "img"]
+            for index, chapter in enumerate(chapters):
+                content = chapter.get_content().decode()
+                clean_content = clean(
+                    content,
+                    tags=allowed_tags,
+                    strip=True,
+                )
+                new_chapter = Chapter(
+                    index=index,
+                    title=f"Chapter {index + 1}",
+                    content=clean_content,
+                    book_id=new_book.id,
+                )
+                db.session.add(new_chapter)
+            db.session.commit()
 
 
 @app.route("/")
 def index():
-    """Index."""
-    reload_files()
-    theme = flask.request.args.get("theme")
-    color1, color2 = get_theme(theme)
-    books = Book.objects().order_by("title")
+    load_books()  # Add new books to the database if they are not already present
+    books = Book.query.all()
+    return render_template("index.jinja2", books=books)
 
-    return flask.render_template_string(
-        index_template,
-        books=books,
-        title="Dreads",
-        color1=color1,
-        color2=color2,
-        theme=theme,
+
+@app.route("/book/<int:book_id>/chapter/<int:chapter_index>")
+def read_chapter(book_id, chapter_index):
+    book = Book.query.get_or_404(book_id)
+    chapter = Chapter.query.filter_by(
+        book_id=book_id, index=chapter_index
+    ).first_or_404()
+
+    # Save progress
+    progress = BookProgress.query.filter_by(book_id=book_id).first()
+    if not progress:
+        progress = BookProgress(book_id=book_id, chapter_index=chapter_index)
+        db.session.add(progress)
+    else:
+        progress.chapter_index = chapter_index
+    db.session.commit()
+
+    total_chapters = Chapter.query.filter_by(book_id=book_id).count()
+    return render_template(
+        "chapter.jinja2",
+        title=book.title,
+        content=chapter.content,
+        book_id=book_id,
+        chapter_index=chapter_index,
+        total_chapters=total_chapters,
     )
 
 
-def reload_files():
-    """Reload epubs from disk."""
-    disk_books = list(Path("./epub").glob("*.epub"))
-    disk_books_filenames = [x.name for x in disk_books]
-    db_books = Book.objects().values_list("filename")
-    for disk_book in disk_books:
-        if disk_book.name not in db_books:
-            print(f"adding {disk_book}")
-            book = epub.read_epub(disk_book)
-            title = book.title
-            authors = book.get_metadata("DC", "creator")[0][0]
-            b = Book(title=title, filename=disk_book.name, author=authors)
-            b.save()
-    # remove missing books from database
-    books_to_remove = list()
-    for db_book in db_books:
-        if db_book not in disk_books_filenames:
-            print(f"removing missing book: {db_book}")
-            books_to_remove.append(db_book)
-    for book_to_remove in books_to_remove:
-        print(Book.objects(filename=book_to_remove).delete())
-
-
-@app.route("/view/<book_id>/<ch>")
-def view(book_id, ch):
-    """View."""
-    theme = flask.request.args.get("theme")
-    color1, color2 = get_theme(theme)
-    ch = int(ch)
-    book = Book.objects(id=book_id).first()
-    book_content = epub.read_epub("epub/" + book.filename)
-    chapters = list(book_content.get_items())
-    chapter = chapters[ch]
-    html = chapter.get_content()
-    soup = BeautifulSoup(html, features="lxml")
-    ps = list()
-    for p in soup.find_all("p"):
-        ps.append(p.get_text())
-
-    book.last_part = ch
-    book.part_count = len(chapters)
-    book.save()
-
-    return flask.render_template_string(
-        view_template,
-        book=book,
-        title=book.title,
-        ps=ps,
-        color1=color1,
-        color2=color2,
-        theme=theme,
+@app.route("/book/<int:book_id>")
+def continue_reading(book_id):
+    progress = BookProgress.query.filter_by(book_id=book_id).first()
+    chapter_index = progress.chapter_index if progress else 0
+    return redirect(
+        url_for("read_chapter", book_id=book_id, chapter_index=chapter_index)
     )
 
 
 if __name__ == "__main__":
-    app.run(port=5438)
+    # Create the database tables and load books from disk
+    with app.app_context():
+        db.create_all()
+        load_books()
+    app.run(port=5438, debug=True)

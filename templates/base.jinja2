@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    {% if chapter_index %}
+      <title>{{ title }} - Chapter {{ chapter_index + 1 }}</title>
+    {% else %}
+      <title>Ebook list</title>
+    {% endif %}
+    <style>
+      * {
+      background-color: black;
+      color: white;
+      }
+    </style>
+
+  </head>
+  {% block content %}
+  {% endblock %}
+</html>

@@ -1,0 +1,26 @@
+{% extends 'base.jinja2' %}
+{% block content %}
+  <body>
+    <div style="margin-bottom: 20px;">
+      {% if chapter_index > 0 %}
+        <a href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index - 1) }}">Previous Chapter</a>
+      {% endif %}
+      {% if chapter_index < total_chapters - 1 %}
+        <a href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index + 1) }}" style="float: right;">Next Chapter</a>
+      {% endif %}
+    </div>
+
+    <div>
+      {{ content | safe }}
+    </div>
+
+    <div style="margin-top: 20px;">
+      {% if chapter_index > 0 %}
+        <a href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index - 1) }}">Previous Chapter</a>
+      {% endif %}
+      {% if chapter_index < total_chapters - 1 %}
+        <a href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index + 1) }}" style="float: right;">Next Chapter</a>
+      {% endif %}
+    </div>
+  </body>
+{% endblock %}
