@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     {% if book and chapter_index %}
       {% set title = book.author + " - " + book.title + " - Chapter " + (chapter_index + 1)|string %}
     {% else %}

@@ -1,31 +1,32 @@
 {% extends 'base.jinja2' %}
 {% block content %}
   <body>
-    {% if books["in_progress"] %}
+    {% if in_progress_books %}
       <h1>In progress</h1>
       <ul>
-        {% for book in books["in_progress"] %}
+        {% for updated, book in in_progress_books %}
           <li>
             {% set progress = (book.progress.chapter_index + 1)|string + " / " + book.chapters_count|string %}
-            <a href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a> ({{ progress }})
+            {% set updated_datetime_str = humanize.naturaltime(updated) %}
+            <a href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>&nbsp;&nbsp;({{ progress }})&nbsp;&nbsp;-&nbsp;&nbsp;<i>{{ updated_datetime_str }}</i>&nbsp;&nbsp;<a href="{{ url_for('remove_progress', book_progress_id=book.progress.id) }}">[X]</a>
           </li>
         {% endfor %}
       </ul>
     {% endif %}
-    {% if books["unread"] %}
+    {% if unread_books %}
       <h1>Unread</h1>
       <ul>
-        {% for book in books["unread"] %}
+        {% for book in unread_books %}
           <li>
             <a href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
           </li>
         {% endfor %}
       </ul>
     {% endif %}
-    {% if books["finished"] %}
+    {% if finished_books %}
       <h1>Finished</h1>
       <ul>
-        {% for book in books["finished"] %}
+        {% for book in finished_books %}
           <li>
             <a href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
           </li>

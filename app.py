@@ -9,6 +9,7 @@ from ebooklib import epub
 import ebooklib
 from bleach import clean, sanitizer
 from tqdm import tqdm
+import humanize
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///reader.db"
@@ -20,7 +21,7 @@ migrate = Migrate(app, db)
 class Book(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String, unique=True, nullable=False)
-    author = db.Column(db.String, unique=False, nullable=False)
+    author = db.Column(db.String, unique=False, index=True, nullable=False)
     title = db.Column(db.String, nullable=False)
     chapters_count = db.Column(db.Integer, nullable=False)
     chapters = db.relationship("Chapter", backref="book", lazy=True)
@@ -32,7 +33,9 @@ class Chapter(db.Model):
     index = db.Column(db.Integer, nullable=False)
     title = db.Column(db.String, nullable=True)
     content = db.Column(db.Text, nullable=False)
-    book_id = db.Column(db.Integer, db.ForeignKey("book.id"), nullable=False)
+    book_id = db.Column(
+        db.Integer, db.ForeignKey("book.id"), index=True, nullable=False
+    )
 
 
 class BookProgress(db.Model):
@@ -40,7 +43,7 @@ class BookProgress(db.Model):
     chapter_index = db.Column(db.Integer, nullable=False)
     updated_datetime = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     book_id = db.Column(
-        db.Integer, db.ForeignKey("book.id"), nullable=False, unique=True
+        db.Integer, db.ForeignKey("book.id"), index=True, nullable=False, unique=True
     )
 
 
@@ -56,12 +59,12 @@ def load_books():
             book_epub = epub.read_epub(book_path, {"ignore_ncx": True})
             # print(book_epub.metadata)
             title = (
-                book_epub.get_metadata("DC", "title")[0][0]
+                book_epub.get_metadata("DC", "title")[0][0].strip()
                 if book_epub.get_metadata("DC", "title")
                 else "Untitled"
             )
             author = (
-                book_epub.get_metadata("DC", "creator")[0][0]
+                book_epub.get_metadata("DC", "creator")[0][0].strip()
                 if book_epub.get_metadata("DC", "creator")
                 else "Unknown Author"
             )
@@ -104,25 +107,30 @@ def load_books():
 
 @app.route("/")
 def index():
-    load_books()  # Add new books to the database if they are not already present
     books = Book.query.order_by(Book.author, Book.title).all()
-    books2 = collections.defaultdict(list)
+    unread_books = []
+    finished_books = []
+    in_progress_books = []
+    now = datetime.datetime.utcnow()
+
     for book in books:
         if not book.progress:
-            books2["unread"].append(book)
+            unread_books.append(book)
         if book.progress:
             if book.progress.chapter_index + 1 >= book.chapters_count:
-                books2["finished"].append(book)
+                finished_books.append(book)
             else:
-                books2["in_progress"].append(book)
-    books = {
-        "in_progress": sorted(
-            [b for b in books if b.progress],
-            key=lambda bb: bb.progress.updated_datetime,
-        ),
-        "unread": [b for b in books if not b.progress],
-    }
-    return render_template("index.jinja2", books=books2)
+                in_progress_books.append((now - book.progress.updated_datetime, book))
+
+    in_progress_books = sorted(in_progress_books, key=lambda bb: bb[0])
+
+    return render_template(
+        "index.jinja2",
+        unread_books=unread_books,
+        finished_books=finished_books,
+        in_progress_books=in_progress_books,
+        humanize=humanize,
+    )
 
 
 @app.route("/book/<int:book_id>/chapter/<int:chapter_index>")
@@ -152,6 +160,14 @@ def read_chapter(book_id, chapter_index):
         chapter_index=chapter_index,
         total_chapters=total_chapters,
     )
+
+
+@app.route("/remove_progress/<int:book_progress_id>")
+def remove_progress(book_progress_id):
+    book_progress = BookProgress.query.get_or_404(book_progress_id)
+    book = book_progress.book
+    book.progress = None
+    db.session.commit()
 
 
 @app.route("/book/<int:book_id>")
