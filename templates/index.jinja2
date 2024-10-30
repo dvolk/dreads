@@ -1,13 +1,36 @@
 {% extends 'base.jinja2' %}
 {% block content %}
-<body>
-    <h1>Available Books</h1>
-    <ul>
-    {% for book in books %}
-        <li>
+  <body>
+    {% if books["in_progress"] %}
+      <h1>In progress</h1>
+      <ul>
+        {% for book in books["in_progress"] %}
+          <li>
+            {% set progress = (book.progress.chapter_index + 1)|string + " / " + book.chapters_count|string %}
+            <a href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a> ({{ progress }})
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    {% if books["unread"] %}
+      <h1>Unread</h1>
+      <ul>
+        {% for book in books["unread"] %}
+          <li>
             <a href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
-        </li>
-    {% endfor %}
-    </ul>
-</body>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    {% if books["finished"] %}
+      <h1>Finished</h1>
+      <ul>
+        {% for book in books["finished"] %}
+          <li>
+            <a href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </body>
 {% endblock %}
