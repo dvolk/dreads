@@ -1,8 +1,9 @@
 import collections
 import datetime
 import os
+import secrets
 
-from flask import Flask, render_template, redirect, url_for
+from flask import Flask, render_template, redirect, url_for, session, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from ebooklib import epub
@@ -14,6 +15,7 @@ import humanize
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///reader.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SECRET_KEY"] = secrets.token_urlsafe(64)
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 
@@ -105,6 +107,13 @@ def load_books():
             db.session.commit()
 
 
+@app.route("/apply_settings")
+def apply_settings():
+    session["zoom"] = request.args.get("zoom", 1)
+    session["color"] = request.args.get("color", 1)
+    return redirect(url_for("index"))
+
+
 @app.route("/")
 def index():
     books = Book.query.order_by(Book.author, Book.title).all()
@@ -165,9 +174,9 @@ def read_chapter(book_id, chapter_index):
 @app.route("/remove_progress/<int:book_progress_id>")
 def remove_progress(book_progress_id):
     book_progress = BookProgress.query.get_or_404(book_progress_id)
-    book = book_progress.book
-    book.progress = None
+    db.session.delete(book_progress)
     db.session.commit()
+    return redirect(url_for("index"))
 
 
 @app.route("/book/<int:book_id>")

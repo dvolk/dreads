@@ -1,6 +1,15 @@
 {% extends 'base.jinja2' %}
 {% block content %}
   <body>
+    <h1>Settings</h1>
+    <form action="/apply_settings">
+      Zoom
+      <input style="vertical-align: middle" name="zoom" type="range" min="0.5" max="2" step="0.1" value="{{ session['zoom'] }}"/>
+      Color
+      <input style="vertical-align: middle" name="color" type="range" min="0" max="1" step="0.01" value="{{ session['color'] }}"/>
+      <button style="vertical-align: middle; padding: 5px 10px; margin: 10px; background-color: steelblue; color: white; border: 0px;" name="submit" type="Submit">Apply</button>
+    </form>
+
     {% if in_progress_books %}
       <h1>In progress</h1>
       <ul>
