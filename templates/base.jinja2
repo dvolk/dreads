@@ -14,7 +14,7 @@
       }
       * {
       {% set value = session.get("color", "0")|float %}
-      {% set bg_hex_value = '{:02x}{:02x}{:02x}'.format((value * 255)|int, (value * 255)|int, (value * 255)|int) %}
+      {% set bg_hex_value = perceptual_brightness_hex(value) %}
       background-color: #{{ bg_hex_value }};
       {% if value < 0.5 %}
         color: white;

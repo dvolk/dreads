@@ -114,6 +114,27 @@ def apply_settings():
     return redirect(url_for("index"))
 
 
+def perceptual_brightness_hex(value):
+    # Clamp value between 0 and 1 for safety
+    value = max(0, min(1, value))
+    # Apply correction
+    corrected_value = value ** 2.0
+    # Convert to 8-bit RGB hex format
+    bg_hex_value = "{:02x}{:02x}{:02x}".format(
+        int(corrected_value * 255),
+        int(corrected_value * 255),
+        int(corrected_value * 255),
+    )
+    return bg_hex_value
+
+
+@app.context_processor
+def inject_globals():
+    return {
+        "perceptual_brightness_hex": perceptual_brightness_hex,
+    }
+
+
 @app.route("/")
 def index():
     books = Book.query.order_by(Book.author, Book.title).all()
