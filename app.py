@@ -246,7 +246,6 @@ def continue_reading(book_id):
 
 
 if __name__ == "__main__":
-    # Create the database tables and load books from disk
     with app.app_context():
         load_books()
     app.run(port=5438, debug=True)
