@@ -12,7 +12,7 @@
     </div>
 
     <div>
-      {{ content | safe }}
+{{ content | add_paragraph_ids | safe }}
     </div>
 
     <div style="margin-top: 20px; display: flex; justify-content: space-between">
@@ -24,5 +24,47 @@
         <a href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index + 1) }}" style="float: right;">Next Chapter</a>
       {% endif %}
     </div>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      let timer;
+
+      function updateProgress() {
+        // Find the first paragraph that is visible
+        const paragraphs = document.querySelectorAll('p');
+        let paragraphIndex = 0;
+        for (let i = 0; i < paragraphs.length; i++) {
+          const rect = paragraphs[i].getBoundingClientRect();
+          if (rect.top >= 0 && rect.bottom <= window.innerHeight) {
+            paragraphIndex = i;
+            break;
+          }
+        }
+        // Send progress to server
+        fetch('{{ url_for("update_progress") }}', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            book_id: {{ book_id }},
+            chapter_index: {{ chapter_index }},
+            paragraph_index: paragraphIndex
+          })
+        });
+      }
+
+      window.addEventListener('scroll', function() {
+        clearTimeout(timer);
+        timer = setTimeout(updateProgress, 5000);
+      });
+
+      // Scroll to saved paragraph
+      const savedParagraphIndex = {{ book.progress.paragraph_index if book and book.progress else 0 }};
+      const savedParagraph = document.getElementById('paragraph-' + savedParagraphIndex);
+      if (savedParagraph) {
+        savedParagraph.scrollIntoView();
+      }
+    });
+  </script>
   </body>
 {% endblock %}

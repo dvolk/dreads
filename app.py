@@ -1,7 +1,7 @@
-import collections
 import datetime
 import os
 import secrets
+import json
 
 from flask import Flask, render_template, redirect, url_for, session, request
 from flask_sqlalchemy import SQLAlchemy
@@ -11,6 +11,7 @@ import ebooklib
 from bleach import clean, sanitizer
 from tqdm import tqdm
 import humanize
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///reader.db"
@@ -43,6 +44,7 @@ class Chapter(db.Model):
 class BookProgress(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     chapter_index = db.Column(db.Integer, nullable=False)
+    paragraph_index = db.Column(db.Integer, nullable=False, default=0)
     updated_datetime = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     book_id = db.Column(
         db.Integer, db.ForeignKey("book.id"), index=True, nullable=False, unique=True
@@ -128,10 +130,44 @@ def perceptual_brightness_hex(value):
     return bg_hex_value
 
 
+@app.route("/update_progress", methods=["POST"])
+def update_progress():
+    data = request.get_json()
+    book_id = data.get("book_id")
+    chapter_index = data.get("chapter_index")
+    paragraph_index = data.get("paragraph_index")
+    if book_id is None or chapter_index is None or paragraph_index is None:
+        return json.dumps({"error": "Invalid data"}), 400
+
+    progress = BookProgress.query.filter_by(book_id=book_id).first()
+    if not progress:
+        progress = BookProgress(
+            book_id=book_id,
+            chapter_index=chapter_index,
+            paragraph_index=paragraph_index,
+        )
+        db.session.add(progress)
+    else:
+        progress.chapter_index = chapter_index
+        progress.paragraph_index = paragraph_index
+        progress.updated_datetime = datetime.datetime.utcnow()
+    db.session.commit()
+    return json.dumps({"status": "success"})
+
+
+@app.template_filter("add_paragraph_ids")
+def add_paragraph_ids(content):
+    soup = BeautifulSoup(content, "html.parser")
+    for idx, p in enumerate(soup.find_all("p")):
+        p["id"] = f"paragraph-{idx}"
+    return soup.prettify()
+
+
 @app.context_processor
 def inject_globals():
     return {
         "perceptual_brightness_hex": perceptual_brightness_hex,
+        "add_paragraph_ids": add_paragraph_ids,
     }
 
 
