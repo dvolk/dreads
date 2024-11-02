@@ -17,7 +17,7 @@
           <li>
             {% set progress = (book.progress.chapter_index + 1)|string + " / " + book.chapters_count|string %}
             {% set updated_datetime_str = humanize.naturaltime(updated) %}
-            <a href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>&nbsp;&nbsp;({{ progress }})&nbsp;&nbsp;-&nbsp;&nbsp;<i>{{ updated_datetime_str }}</i>&nbsp;&nbsp;<a href="{{ url_for('remove_progress', book_progress_id=book.progress.id) }}">[X]</a>
+            <a target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>&nbsp;&nbsp;({{ progress }})&nbsp;&nbsp;-&nbsp;&nbsp;<i>{{ updated_datetime_str }}</i>&nbsp;&nbsp;<a href="{{ url_for('remove_progress', book_progress_id=book.progress.id) }}">[X]</a>
           </li>
         {% endfor %}
       </ul>
@@ -27,7 +27,7 @@
       <ul>
         {% for book in unread_books %}
           <li>
-            <a href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
+            <a target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
           </li>
         {% endfor %}
       </ul>
@@ -37,7 +37,7 @@
       <ul>
         {% for book in finished_books %}
           <li>
-            <a href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
+            <a target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
           </li>
         {% endfor %}
       </ul>
