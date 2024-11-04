@@ -179,16 +179,14 @@ def index():
     in_progress_books = []
     now = datetime.datetime.utcnow()
 
-    for book in books:
-        if not book.progress:
-            unread_books.append(book)
-        if book.progress:
-            if book.progress.chapter_index + 1 >= book.chapters_count:
-                finished_books.append(book)
-            else:
-                in_progress_books.append((now - book.progress.updated_datetime, book))
+    # Use list comprehensions for each list
+    unread_books = [book for book in books if not book.progress]
 
-    in_progress_books = sorted(in_progress_books, key=lambda bb: bb[0])
+    finished_books = [book for book in books if book.progress and book.progress.chapter_index + 1 >= book.chapters_count]
+
+    in_progress_books = sorted(
+        [(now - book.progress.updated_datetime, book) for book in books if book.progress and book.progress.chapter_index + 1 < book.chapters_count],
+        key=lambda bb: bb[0])
 
     return render_template(
         "index.jinja2",
