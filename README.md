@@ -14,8 +14,10 @@
 # Features
 
 * Automatically add books from a directory.
-* Night theme with #000 background for OLED screens / low-light reading.
-* Remembers which chapter you were on.
+* Show in-progress and finished books.
+* Remembers which chapter and paragraph you were on.
+* Change entire app zoom per-session.
+* Change the background color continuosly from black #000 to white #fff per-session.
 
 ## Installation
 
@@ -28,16 +30,10 @@
 
 ## Running
 
-    python3 app.py
+    env/bin/python app.py
 
 ## Add books
 
 To add books, put them in the `epub/` directory and restart the application.
 
 Book contents is saved in the database, so the epubs can be removed after they've been loaded into the app.
-
-## Authentication
-
-Dreads doesn't provide any authentication.
-
-If you want to run a publically accessible dreads, you can configure your web server to use basic authentication on the dreads domain.
