@@ -3,52 +3,19 @@
 # load a book to the database, book in folder ./books
 # curl -X POST -H "Content-Type: application/json" -d '{"filename": "new_book.epub"}' http://127.0.0.1:5448/api/load_book
 
-import datetime
 from flask import Flask, request, jsonify
 from tqdm import tqdm
-import secrets
 import os
 from ebooklib import epub
-import ebooklib
+import ebooklib  # Add missing import
 from bleach import clean, sanitizer
-from flask_sqlalchemy import SQLAlchemy
+from db_handler import db, add_book_to_db  # Import database-related functions
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///reader.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["SECRET_KEY"] = secrets.token_urlsafe(64)
-db = SQLAlchemy(app)
 
-# Database Models
-
-class Book(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    filename = db.Column(db.String, unique=True, nullable=False)
-    author = db.Column(db.String, unique=False, index=True, nullable=False)
-    title = db.Column(db.String, nullable=False)
-    chapters_count = db.Column(db.Integer, nullable=False)
-    chapters = db.relationship("Chapter", backref="book", lazy=True)
-    progress = db.relationship("BookProgress", backref="book", uselist=False)
-
-
-class Chapter(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    index = db.Column(db.Integer, nullable=False)
-    title = db.Column(db.String, nullable=True)
-    content = db.Column(db.Text, nullable=False)
-    book_id = db.Column(
-        db.Integer, db.ForeignKey("book.id"), index=True, nullable=False
-    )
-
-
-class BookProgress(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    chapter_index = db.Column(db.Integer, nullable=False)
-    paragraph_index = db.Column(db.Integer, nullable=False, default=0)
-    updated_datetime = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    book_id = db.Column(
-        db.Integer, db.ForeignKey("book.id"), index=True, nullable=False, unique=True
-    )
+db.init_app(app)  # Initialize the database with the app
 
 # Assuming BOOKS_DIR is defined
 BOOKS_DIR = './books'
@@ -65,11 +32,6 @@ def load_book():
     book_path = os.path.join(BOOKS_DIR, filename)
     if not os.path.exists(book_path):
         return jsonify({"error": "File not found"}), 404
-
-    # Check if the book already exists in the database
-    existing_filenames = {book.filename for book in Book.query.all()}
-    if filename in existing_filenames:
-        return jsonify({"message": "Book already loaded"}), 200
 
     # Load and process the book
     try:
@@ -103,23 +65,25 @@ def load_book():
                 tags=allowed_tags,
                 strip=True,
             )
-            new_chapter = Chapter(
-                index=index,
-                title=f"Chapter {index + 1}",
-                content=clean_content,
-            )
+            new_chapter = {
+                "index": index,
+                "title": f"Chapter {index + 1}",
+                "content": clean_content,
+            }
             processed_chapters.append(new_chapter)
 
         # Create a new Book entry
-        new_book = Book(
-            filename=filename,
-            title=title,
-            author=author,
-            chapters=processed_chapters,
-            chapters_count=len(processed_chapters),
-        )
-        db.session.add(new_book)
-        db.session.commit()
+        new_book_data = {
+            "filename": filename,
+            "title": title,
+            "author": author,
+            "chapters": processed_chapters,
+            "chapters_count": len(processed_chapters),
+        }
+
+        # Add book to the database
+        with app.app_context():
+            add_book_to_db(new_book_data)
 
         return jsonify({"message": "Book loaded successfully"}), 201
     except Exception as e:
