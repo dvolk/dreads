@@ -14,33 +14,26 @@
 # Features
 
 * Automatically add books from a directory.
-* Night theme with #000 background for OLED screens / low-light reading.
-* Remembers which chapter you were on.
+* Show in-progress and finished books.
+* Remembers which chapter and paragraph you were on.
+* Change entire app zoom per-session.
+* Change the background color continuosly from black #000 to white #fff per-session.
 
 ## Installation
 
-You will need mongodb:
-
-    apt install mongodb-server
-
-No further database configuration is needed.
 
     git clone https://github.com/dvolk/dreads
     cd dreads
-    virtualenv env
-    source env/bin/activate
-    pip3 install -r requirements.txt
+    python3 -m venv env
+    env/bin/pip install -r requirements.txt
+    env/bin/flask db upgrade
 
 ## Running
 
-    python3 main.py
+    env/bin/python app.py
 
 ## Add books
 
-To add books, put them in the `epub/` directory and refresh the index.
+To add books, put them in the `epub/` directory and restart the application.
 
-## Authentication
-
-Dreads doesn't provide any authentication.
-
-If you want to run a publically accessible dreads, you can configure your web server to use basic authentication on the dreads domain.
+Book contents is saved in the database, so the epubs can be removed after they've been loaded into the app.
