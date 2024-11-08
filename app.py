@@ -1,17 +1,19 @@
 import datetime
+import json
 import os
 import secrets
-import json
+import threading
+import time
 
-from flask import Flask, render_template, redirect, url_for, session, request
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
-from ebooklib import epub
 import ebooklib
-from bleach import clean, sanitizer
-from tqdm import tqdm
 import humanize
+from bleach import clean, sanitizer
 from bs4 import BeautifulSoup
+from ebooklib import epub
+from flask import Flask, redirect, render_template, request, session, url_for
+from flask_migrate import Migrate
+from flask_sqlalchemy import SQLAlchemy
+from tqdm import tqdm
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///reader.db"
@@ -19,6 +21,7 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = secrets.token_urlsafe(64)
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
+load_books_event = threading.Event()
 
 # Database Models
 class Book(db.Model):
@@ -245,7 +248,20 @@ def continue_reading(book_id):
     )
 
 
+@app.route("/trigger_load_books")
+def trigger_load_books():
+    load_books_event.set()
+    return redirect(url_for("index"))
+
+
 if __name__ == "__main__":
-    with app.app_context():
-        load_books()
-    app.run(port=5438, debug=True)
+
+    def load_books_thread():
+        while True:
+            with app.app_context():
+                load_books()
+            load_books_event.wait(timeout=60 * 60)
+            load_books_event.clear()
+
+    threading.Thread(target=load_books_thread, daemon=True).start()
+    app.run(port=5438)

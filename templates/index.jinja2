@@ -9,6 +9,9 @@
       <input style="vertical-align: middle" name="color" type="range" min="0" max="1" step="0.01" value="{{ session.get('color', 0) }}"/>
       <button style="vertical-align: middle; padding: 5px 10px; margin: 10px; background-color: steelblue; color: white; border: 0px;" name="submit" type="Submit">Apply</button>
     </form>
+    <form action="/trigger_load_books">
+      <button style="vertical-align: middle; padding: 5px 10px; margin: 10px; background-color: steelblue; color: white; border: 0px;" name="submit" type="Submit">Reload books</button>
+    </form>
 
     {% if in_progress_books %}
       <h1>In progress</h1>
