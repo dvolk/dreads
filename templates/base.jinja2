@@ -17,17 +17,11 @@
       break-inside: avoid-column;
       }
       a { text-decoration: none; }
-      a:hover { font-weight: bold; }
+      a.listitem:hover { font-weight: bold; }
       body { zoom: {{ session.get("zoom", 1) }}; }
       * {
-      {% set value = session.get("color", "0")|float %}
-      {% set bg_hex_value = perceptual_brightness_hex(value) %}
-      background-color: #{{ bg_hex_value }};
-      {% if value < 0.5 %}
-        color: white;
-      {% else %}
-        color: black;
-      {% endif %}
+      background-color: {{ session.get("color", '#000000') }};
+      color: {{ get_contrast_color(session.get("color", '#000000')) }};
       }
     </style>
 

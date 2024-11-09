@@ -3,11 +3,11 @@
   <body>
     <div style="margin-bottom: 20px; display: flex; justify-content: space-between">
       {% if chapter_index > 0 %}
-        <a href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index - 1) }}">Previous Chapter</a>
+        <a class="listitem" href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index - 1) }}">Previous Chapter</a>
       {% endif %}
-      <a href="{{ url_for('index') }}" style="margin: 0 auto;">{{ title }}</a>
+      <a class="listitem" href="{{ url_for('index') }}" style="margin: 0 auto;">{{ title }}</a>
       {% if chapter_index < total_chapters - 1 %}
-        <a href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index + 1) }}" style="float: right;">Next Chapter</a>
+        <a class="listitem" href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index + 1) }}" style="float: right;">Next Chapter</a>
       {% endif %}
     </div>
 
@@ -17,11 +17,11 @@
 
     <div style="margin-top: 20px; display: flex; justify-content: space-between">
       {% if chapter_index > 0 %}
-        <a href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index - 1) }}">Previous Chapter</a>
+        <a class="listitem" href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index - 1) }}">Previous Chapter</a>
       {% endif %}
-      <a href="{{ url_for('index') }}" style="margin: 0 auto;">{{ title }}</a>
+      <a class="listitem" href="{{ url_for('index') }}" style="margin: 0 auto;">{{ title }}</a>
       {% if chapter_index < total_chapters - 1 %}
-        <a href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index + 1) }}" style="float: right;">Next Chapter</a>
+        <a class="listitem" href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index + 1) }}" style="float: right;">Next Chapter</a>
       {% endif %}
     </div>
     <script>

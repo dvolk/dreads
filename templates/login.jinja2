@@ -1,0 +1,47 @@
+<html lang="en">
+  <meta charset="UTF-8">
+  <meta name="referrer" content="no-referrer">
+  <title>Login</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/w3.css">
+  <link rel="stylesheet" href="/static/font-awesome-4.7.0/css/font-awesome.min.css">
+  {% block head %}
+  {% endblock %}
+  <style>
+    pre { white-space: pre-wrap }
+    a { text-decoration: none }
+    .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+    li:hover { opacity: 0.6; }
+    .image:hover { opacity: 0.6; }
+    p,h1,h2,h3,h4,h5,h6 { font-family: Roboto Condensed, sans-serif !important; }
+    {% block style %}
+    {% endblock %}
+  </style>
+
+  <body class="w3-black">
+    <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
+      <div style="border-radius: 10px;width: 300px;" class="w3-white w3-padding">
+        <h2>
+          <img style="position: relative; top: -4px;" height=45 src="{{ url_for('static', filename="cat-face_1f431.png") }}">
+            reads
+        </h2>
+        <form method="post">
+          <Label>Username:
+            <input class="w3-input w3-pale-yellow w3-round" name="username">
+          </label>
+
+          <div style="margin-bottom: 10px;"></div>
+
+          <label>Password:
+            <input class="w3-input w3-pale-yellow w3-round" name="password" type="password">
+          </label>
+
+          <br/>
+
+          <button class="w3-btn w3-blue w3-round" type="submit">Log in</button>
+
+        </form>
+      </div>
+    </div>
+  </body>
+</html>

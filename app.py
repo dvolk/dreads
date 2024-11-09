@@ -10,10 +10,19 @@ import humanize
 from bleach import clean, sanitizer
 from bs4 import BeautifulSoup
 from ebooklib import epub
-from flask import Flask, redirect, render_template, request, session, url_for
+from flask import Flask, redirect, render_template, request, session, url_for, abort
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from tqdm import tqdm
+from flask_login import (
+    LoginManager,
+    UserMixin,
+    login_user,
+    logout_user,
+    login_required,
+    current_user,
+)
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///reader.db"
@@ -21,6 +30,8 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = secrets.token_urlsafe(64)
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
+login_manager = LoginManager(app)
+login_manager.login_view = "login"
 load_books_event = threading.Event()
 
 # Database Models
@@ -50,8 +61,64 @@ class BookProgress(db.Model):
     paragraph_index = db.Column(db.Integer, nullable=False, default=0)
     updated_datetime = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     book_id = db.Column(
-        db.Integer, db.ForeignKey("book.id"), index=True, nullable=False, unique=True
+        db.Integer, db.ForeignKey("book.id"), index=True, nullable=False
     )
+    user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id"), index=True, nullable=False
+    )
+
+
+class User(db.Model, UserMixin):
+    """User model and flask-login mixin."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(64), nullable=False)
+    password_hash = db.Column(db.String(200), nullable=False)
+
+    book_progresses = db.relationship(
+        "BookProgress",
+        backref=db.backref("BookProgress", lazy=True),
+    )
+
+    def set_password(self, new_password):
+        self.password_hash = generate_password_hash(new_password)
+
+    def check_password(self, maybe_password):
+        return check_password_hash(self.password_hash, maybe_password)
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username")
+        maybe_password = request.form.get("password")
+
+        user = User.query.filter_by(username=username).first_or_404()
+
+        if user.check_password(maybe_password):
+            print("okay")
+            login_user(user)
+            return redirect(url_for("index"))
+        else:
+            print("wrong password")
+            abort(404)
+    if request.method == "GET":
+        return render_template("login.jinja2")
+
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    """
+    This is called by flask-login on every request to load the user
+    """
+    return User.query.filter_by(id=int(user_id)).first()
 
 
 BOOKS_DIR = "./epub"
@@ -113,28 +180,30 @@ def load_books():
 
 
 @app.route("/apply_settings")
+@login_required
 def apply_settings():
     session.permanent = True
     session["zoom"] = request.args.get("zoom", 1)
-    session["color"] = request.args.get("color", 1)
+    session["color"] = request.args.get("color", "#000000")
     return redirect(url_for("index"))
 
 
-def perceptual_brightness_hex(value):
-    # Clamp value between 0 and 1 for safety
-    value = max(0, min(1, value))
-    # Apply correction
-    corrected_value = value ** 2.0
-    # Convert to 8-bit RGB hex format
-    bg_hex_value = "{:02x}{:02x}{:02x}".format(
-        int(corrected_value * 255),
-        int(corrected_value * 255),
-        int(corrected_value * 255),
-    )
-    return bg_hex_value
+def get_contrast_color(bg_color):
+    # Remove '#' and convert hex to RGB
+    hex_color = bg_color.lstrip("#")
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+
+    # Calculate brightness
+    brightness = ((r * 299) + (g * 587) + (b * 114)) / 1000
+
+    # Decide on the foreground color
+    return "black" if brightness > 128 else "white"
 
 
 @app.route("/update_progress", methods=["POST"])
+@login_required
 def update_progress():
     data = request.get_json()
     book_id = data.get("book_id")
@@ -143,10 +212,13 @@ def update_progress():
     if book_id is None or chapter_index is None or paragraph_index is None:
         return json.dumps({"error": "Invalid data"}), 400
 
-    progress = BookProgress.query.filter_by(book_id=book_id).first()
+    progress = BookProgress.query.filter_by(
+        book_id=book_id, user_id=current_user.id
+    ).first()
     if not progress:
         progress = BookProgress(
             book_id=book_id,
+            user_id=current_user.id,
             chapter_index=chapter_index,
             paragraph_index=paragraph_index,
         )
@@ -170,12 +242,13 @@ def add_paragraph_ids(content):
 @app.context_processor
 def inject_globals():
     return {
-        "perceptual_brightness_hex": perceptual_brightness_hex,
+        "get_contrast_color": get_contrast_color,
         "add_paragraph_ids": add_paragraph_ids,
     }
 
 
 @app.route("/")
+@login_required
 def index():
     books = Book.query.order_by(Book.author, Book.title).all()
     unread_books = []
@@ -187,6 +260,8 @@ def index():
         if not book.progress:
             unread_books.append(book)
         if book.progress:
+            if not book.progress.user_id == current_user.id:
+                continue
             if book.progress.chapter_index + 1 >= book.chapters_count:
                 finished_books.append(book)
             else:
@@ -204,6 +279,7 @@ def index():
 
 
 @app.route("/book/<int:book_id>/chapter/<int:chapter_index>")
+@login_required
 def read_chapter(book_id, chapter_index):
     book = Book.query.get_or_404(book_id)
     chapter = Chapter.query.filter_by(
@@ -213,7 +289,9 @@ def read_chapter(book_id, chapter_index):
     # Save progress
     progress = BookProgress.query.filter_by(book_id=book_id).first()
     if not progress:
-        progress = BookProgress(book_id=book_id, chapter_index=chapter_index)
+        progress = BookProgress(
+            book_id=book_id, user_id=current_user.id, chapter_index=chapter_index
+        )
         db.session.add(progress)
     else:
         progress.chapter_index = chapter_index
@@ -233,16 +311,22 @@ def read_chapter(book_id, chapter_index):
 
 
 @app.route("/remove_progress/<int:book_progress_id>")
+@login_required
 def remove_progress(book_progress_id):
     book_progress = BookProgress.query.get_or_404(book_progress_id)
+    if book_progress.user_id != current_user.id:
+        abort(403)
     db.session.delete(book_progress)
     db.session.commit()
     return redirect(url_for("index"))
 
 
 @app.route("/book/<int:book_id>")
+@login_required
 def continue_reading(book_id):
-    progress = BookProgress.query.filter_by(book_id=book_id).first()
+    progress = BookProgress.query.filter_by(
+        book_id=book_id, user_id=current_user.id
+    ).first()
     chapter_index = progress.chapter_index if progress else 0
     return redirect(
         url_for("read_chapter", book_id=book_id, chapter_index=chapter_index)
@@ -250,6 +334,7 @@ def continue_reading(book_id):
 
 
 @app.route("/trigger_load_books")
+@login_required
 def trigger_load_books():
     load_books_event.set()
     return redirect(url_for("index"))
