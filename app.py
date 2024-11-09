@@ -114,6 +114,7 @@ def load_books():
 
 @app.route("/apply_settings")
 def apply_settings():
+    session.permanent = True
     session["zoom"] = request.args.get("zoom", 1)
     session["color"] = request.args.get("color", 1)
     return redirect(url_for("index"))
