@@ -9,9 +9,16 @@
     {% endif %}
     <title>{{ title }}</title>
     <style>
-      body {
-      zoom: {{ session.get("zoom", 1) }};
+      button { border-radius: 5px; }
+      .columns {
+      margin: 5px;
+      column-count: auto;
+      column-width: 30ch;
+      break-inside: avoid-column;
       }
+      a { text-decoration: none; }
+      a:hover { font-weight: bold; }
+      body { zoom: {{ session.get("zoom", 1) }}; }
       * {
       {% set value = session.get("color", "0")|float %}
       {% set bg_hex_value = perceptual_brightness_hex(value) %}

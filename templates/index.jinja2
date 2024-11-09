@@ -27,7 +27,7 @@
     {% endif %}
     {% if unread_books %}
       <h1>Unread</h1>
-      <ul>
+      <ul class="columns">
         {% for book in unread_books %}
           <li>
             <a target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
@@ -37,7 +37,7 @@
     {% endif %}
     {% if finished_books %}
       <h1>Finished</h1>
-      <ul>
+      <ul class="columns">
         {% for book in finished_books %}
           <li>
             <a target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
@@ -45,5 +45,6 @@
         {% endfor %}
       </ul>
     {% endif %}
+    <br/><br/>
   </body>
 {% endblock %}
