@@ -59,7 +59,7 @@
       });
 
       // Scroll to saved paragraph
-      const savedParagraphIndex = {{ book_progress.paragraph_index if book and book_progress else 0 }};
+      const savedParagraphIndex = {{ book_progress.paragraph_index if book and book_progress else 0 }} - 1;
       const savedParagraph = document.getElementById('paragraph-' + savedParagraphIndex);
       if (savedParagraph) {
         savedParagraph.scrollIntoView();

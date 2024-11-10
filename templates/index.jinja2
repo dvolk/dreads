@@ -1,8 +1,9 @@
 {% extends 'base.jinja2' %}
 {% block content %}
   <body>
+    <img id="hover-image" class="hover-image" src="" alt="Hover Image">
     <h1>Settings</h1>
-    <form action="/apply_settings">
+    <form id="settingsform" action="/apply_settings">
       Zoom
       <input style="vertical-align: middle" name="zoom" type="range" min="0.5" max="1.5" step="0.1" value="{{ session.get('zoom', 1) }}"/>
       Color
@@ -12,7 +13,6 @@
     <form action="/trigger_load_books">
       <button style="vertical-align: middle; padding: 5px 10px; margin: 10px; background-color: steelblue; color: white; border: 0px;" name="submit" type="Submit">Reload books</button>
     </form>
-
     {% if in_progress_books %}
       <h1>In progress</h1>
       <ul>
@@ -20,7 +20,7 @@
           <li>
             {% set progress = (book_progress.chapter_index + 1)|string + " / " + book.chapters_count|string %}
             {% set updated_datetime_str = humanize.naturaltime(updated) %}
-            <a class="listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>&nbsp;&nbsp;({{ progress }})&nbsp;&nbsp;-&nbsp;&nbsp;<i>{{ updated_datetime_str }}</i>&nbsp;&nbsp;<a href="{{ url_for('remove_progress', book_progress_id=book_progress.id) }}">[X]</a>
+            <a data-image="{{ 'static/cover-' + book.id|string + '.jpg' }}" class="hover-text listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>&nbsp;&nbsp;({{ progress }})&nbsp;&nbsp;-&nbsp;&nbsp;<i>{{ updated_datetime_str }}</i>&nbsp;&nbsp;<a href="{{ url_for('remove_progress', book_progress_id=book_progress.id) }}">[X]</a>
           </li>
         {% endfor %}
       </ul>
@@ -30,7 +30,7 @@
       <ul class="columns">
         {% for book in unread_books %}
           <li>
-            <a class="listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
+            <a data-image="{{ 'static/cover-' + book.id|string + '.jpg' }}" class="hover-text listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
           </li>
         {% endfor %}
       </ul>
@@ -40,11 +40,48 @@
       <ul class="columns">
         {% for book in finished_books %}
           <li>
-            <a class="listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
+            <a data-image="{{ 'static/cover-' + book.id|string + '.jpg' }}" class="hover-text listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
           </li>
         {% endfor %}
       </ul>
     {% endif %}
     <br/><br/>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+      var form = document.getElementById("settingsform");
+        console.log(form)
+        var inputs = form.querySelectorAll("input[type='range'], input[type='color']");
+
+        inputs.forEach(function (input) {
+          input.addEventListener("change", function () {
+            form.submit();
+          });
+        });
+
+        form.querySelector("input[type='submit']").style.display = "none";
+      });
+
+      // Reference to the hover image element
+      const hoverImage = document.getElementById('hover-image');
+
+      // Add event listeners to each text with the class "hover-text"
+      document.querySelectorAll('.hover-text').forEach(text => {
+        text.addEventListener('mouseenter', (event) => {
+          // Set the image source to the data-image attribute of the hovered text
+          hoverImage.src = event.target.getAttribute('data-image');
+          hoverImage.style.display = 'block';
+        });
+
+        text.addEventListener('mousemove', (event) => {
+          // Position the image near the mouse pointer
+          hoverImage.style.left = `${event.pageX + 15}px`;
+          hoverImage.style.top = `${event.pageY + 15}px`;
+        });
+
+        text.addEventListener('mouseleave', () => {
+          hoverImage.style.display = 'none'; // Hide the image when not hovering
+        });
+      });
+      </script>
   </body>
 {% endblock %}

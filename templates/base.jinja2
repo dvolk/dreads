@@ -23,6 +23,20 @@
       background-color: {{ session.get("color", '#000000') }};
       color: {{ get_contrast_color(session.get("color", '#000000')) }};
       }
+      #settingsform input[type="submit"] { display: inline; }
+        /* Styles for hover image */
+     .hover-image {
+       position: absolute;
+       display: none; /* Initially hidden */
+       width: 400px;
+       border: 1px solid #ccc;
+       box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+       z-index: 1000;
+     }
+
+     .hover-text {
+       cursor: pointer;
+     }
     </style>
 
   </head>

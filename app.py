@@ -4,7 +4,9 @@ import os
 import secrets
 import threading
 import time
+import pathlib
 
+import argh
 import ebooklib
 import humanize
 from bleach import clean, sanitizer
@@ -23,11 +25,13 @@ from flask_login import (
     current_user,
 )
 from werkzeug.security import generate_password_hash, check_password_hash
+import waitress
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///reader.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = secrets.token_urlsafe(64)
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 99999999999
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 login_manager = LoginManager(app)
@@ -122,6 +126,40 @@ def load_user(user_id):
 
 
 BOOKS_DIR = "./epub"
+
+
+def save_cover_image(book_id):
+    # Try to find the cover ID from metadata
+    book = Book.query.get_or_404(book_id)
+    book_path = os.path.join(BOOKS_DIR, book.filename)
+    book_epub = epub.read_epub(book_path, {"ignore_ncx": True})
+    cover_id = None
+    for meta in book_epub.get_metadata("OPF", "meta"):
+        if meta and len(meta) > 1 and meta[0] and meta[0].get("name") == "cover":
+            cover_id = meta[0].get("content")
+            break
+    # If cover ID is found, get the cover item
+    cover_item = None
+    if cover_id:
+        cover_item = book_epub.get_item_with_id(cover_id)
+    else:
+        # Fallback: look for an image item with 'cover' in its ID or name
+        for item in book_epub.get_items():
+            if item.get_type() == ebooklib.ITEM_IMAGE:
+                if (
+                    "cover" in item.get_id().lower()
+                    or "cover" in item.get_name().lower()
+                ):
+                    cover_item = item
+                    break
+    if cover_item:
+        static_dir = pathlib.Path("./static")
+        static_dir.mkdir(exist_ok=True)
+        cover_path = static_dir / f"cover-{book_id}.jpg"
+        with open(cover_path, "wb") as f:
+            f.write(cover_item.get_content())
+    else:
+        print(f"No cover image found for {book_path}.")
 
 
 def load_books():
@@ -350,8 +388,7 @@ def trigger_load_books():
     return redirect(url_for("index"))
 
 
-if __name__ == "__main__":
-
+def run_app():
     def load_books_thread():
         while True:
             with app.app_context():
@@ -360,4 +397,25 @@ if __name__ == "__main__":
             load_books_event.clear()
 
     threading.Thread(target=load_books_thread, daemon=True).start()
-    app.run(port=5438)
+    waitress.serve(app, port=5438)
+
+
+def process_cover(book_id):
+    with app.app_context():
+        save_cover_image(book_id)
+
+
+def process_covers():
+    with app.app_context():
+        for book in Book.query.all():
+            process_cover(book.id)
+
+
+if __name__ == "__main__":
+    argh.dispatch_commands(
+        [
+            run_app,
+            process_cover,
+            process_covers,
+        ]
+    )
