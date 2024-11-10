@@ -17,10 +17,10 @@
 * Show in-progress and finished books.
 * Remembers which chapter and paragraph you were on.
 * Change entire app zoom per-session.
-* Change the background color continuosly from black #000 to white #fff per-session.
+* Change the background color per-session.
+* Multi-user with shared books and separate reading progress.
 
 ## Installation
-
 
     git clone https://github.com/dvolk/dreads
     cd dreads
@@ -28,12 +28,25 @@
     env/bin/pip install -r requirements.txt
     env/bin/flask db upgrade
 
-## Running
+## Add a user
 
-    env/bin/python app.py
+Enter the flask shell
+
+    env/bin/flask shell
+
+and run the following commands
+
+    u = User(username="your_username")
+    u.set_password("your_password")
+    db.session.add(u)
+    db.session.commit()
 
 ## Add books
 
-To add books, put them in the `epub/` directory and restart the application.
+Copy epub ebooks to ./epub
 
-Book contents is saved in the database, so the epubs can be removed after they've been loaded into the app.
+## Run the app
+
+    env/bin/python app.py
+
+and browse to http://127.0.0.1:5438
