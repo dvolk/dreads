@@ -8,10 +8,10 @@
       <input style="vertical-align: middle" name="zoom" type="range" min="0.5" max="1.5" step="0.1" value="{{ session.get('zoom', 1) }}"/>
       Color
       <input style="vertical-align: middle" name="color" type="color" value="{{ session.get('color', 0) }}"/>
-      <button style="vertical-align: middle; padding: 5px 10px; margin: 10px; background-color: steelblue; color: white; border: 0px;" name="submit" type="Submit">Apply</button>
+      <input style="vertical-align: middle; padding: 5px 10px; margin: 10px; background-color: steelblue; color: white; border: 0px;" type="Submit"/ value="Apply">
     </form>
     <form action="/trigger_load_books">
-      <button style="vertical-align: middle; padding: 5px 10px; margin: 10px; background-color: steelblue; color: white; border: 0px;" name="submit" type="Submit">Reload books</button>
+      <input style="border-radius: 5px; vertical-align: middle; padding: 5px 10px; margin: 10px; background-color: steelblue; color: white; border: 0px;" type="Submit" value="Reload books"/>
     </form>
     {% if in_progress_books %}
       <h1>In progress</h1>
