@@ -290,13 +290,19 @@ def read_chapter(book_id, chapter_index):
     ).first_or_404()
 
     # Save progress
-    progress = BookProgress.query.filter_by(book_id=book_id).first()
+    progress = BookProgress.query.filter_by(
+        book_id=book_id, user_id=current_user.id
+    ).first()
     if not progress:
         progress = BookProgress(
             book_id=book_id, user_id=current_user.id, chapter_index=chapter_index
         )
         db.session.add(progress)
     else:
+        if chapter_index != progress.chapter_index:
+            print(chapter_index, progress.chapter_index, progress.paragraph_index)
+            print("resetting paragraph progress")
+            progress.paragraph_index = 0
         progress.chapter_index = chapter_index
         progress.updated_datetime = datetime.datetime.utcnow()
     db.session.commit()
@@ -307,6 +313,7 @@ def read_chapter(book_id, chapter_index):
         title=book.title,
         content=chapter.content,
         book_id=book_id,
+        book_progress=progress,
         book=book,
         chapter_index=chapter_index,
         total_chapters=total_chapters,
