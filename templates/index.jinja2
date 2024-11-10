@@ -16,11 +16,11 @@
     {% if in_progress_books %}
       <h1>In progress</h1>
       <ul>
-        {% for updated, book in in_progress_books %}
+        {% for updated, book, book_progress in in_progress_books %}
           <li>
-            {% set progress = (book.progress.chapter_index + 1)|string + " / " + book.chapters_count|string %}
+            {% set progress = (book_progress.chapter_index + 1)|string + " / " + book.chapters_count|string %}
             {% set updated_datetime_str = humanize.naturaltime(updated) %}
-            <a class="listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>&nbsp;&nbsp;({{ progress }})&nbsp;&nbsp;-&nbsp;&nbsp;<i>{{ updated_datetime_str }}</i>&nbsp;&nbsp;<a href="{{ url_for('remove_progress', book_progress_id=book.progress.id) }}">[X]</a>
+            <a class="listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>&nbsp;&nbsp;({{ progress }})&nbsp;&nbsp;-&nbsp;&nbsp;<i>{{ updated_datetime_str }}</i>&nbsp;&nbsp;<a href="{{ url_for('remove_progress', book_progress_id=book_progress.id) }}">[X]</a>
           </li>
         {% endfor %}
       </ul>

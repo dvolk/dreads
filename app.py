@@ -42,7 +42,7 @@ class Book(db.Model):
     title = db.Column(db.String, nullable=False)
     chapters_count = db.Column(db.Integer, nullable=False)
     chapters = db.relationship("Chapter", backref="book", lazy=True)
-    progress = db.relationship("BookProgress", backref="book", uselist=False)
+    progresses = db.relationship("BookProgress", backref="book")
 
 
 class Chapter(db.Model):
@@ -251,21 +251,24 @@ def inject_globals():
 @login_required
 def index():
     books = Book.query.order_by(Book.author, Book.title).all()
+    user_progresses = BookProgress.query.filter_by(user_id=current_user.id)
+    user_progresses = {up.book_id: up for up in user_progresses}
     unread_books = []
     finished_books = []
     in_progress_books = []
     now = datetime.datetime.utcnow()
 
     for book in books:
-        if not book.progress:
+        if not book.id in user_progresses:
             unread_books.append(book)
-        if book.progress:
-            if not book.progress.user_id == current_user.id:
-                continue
-            if book.progress.chapter_index + 1 >= book.chapters_count:
+        else:
+            book_progress = user_progresses[book.id]
+            if book_progress.chapter_index + 1 >= book.chapters_count:
                 finished_books.append(book)
             else:
-                in_progress_books.append((now - book.progress.updated_datetime, book))
+                in_progress_books.append(
+                    (now - book_progress.updated_datetime, book, book_progress)
+                )
 
     in_progress_books = sorted(in_progress_books, key=lambda bb: bb[0])
 
