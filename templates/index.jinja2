@@ -1,7 +1,6 @@
 {% extends 'base.jinja2' %}
 {% block content %}
   <body>
-    <img id="hover-image" class="hover-image" src="" alt="Hover Image">
     <h1>Settings</h1>
     <form id="settingsform" action="/apply_settings">
       Zoom
@@ -13,37 +12,66 @@
     <form action="/trigger_load_books">
       <input style="border-radius: 5px; vertical-align: middle; padding: 5px 10px; margin: 10px; background-color: steelblue; color: white; border: 0px;" type="Submit" value="Reload books"/>
     </form>
+    <h1>Search</h1>
+    <form method="GET">
+      <center>
+        <input name="q" placeholder="search (eg: title:'Book Title' author:'Author Name' tag:fiction)" style="border-radius: 10px; padding: 6px; width: 95%" {% if q %}value="{{q|escape}}"{% endif %}>
+      </center>
+    </form>
     {% if in_progress_books %}
       <h1>In progress</h1>
-      <ul>
+      <center>
+      <div class="columns">
         {% for updated, book, book_progress in in_progress_books %}
-          <li>
+          <div class="item">
             {% set progress = (book_progress.chapter_index + 1)|string + " / " + book.chapters_count|string %}
             {% set updated_datetime_str = humanize.naturaltime(updated) %}
-            <a data-image="{{ 'static/cover-' + book.id|string + '.jpg' }}" class="hover-text listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>&nbsp;&nbsp;({{ progress }})&nbsp;&nbsp;-&nbsp;&nbsp;<i>{{ updated_datetime_str }}</i>&nbsp;&nbsp;<a href="{{ url_for('remove_progress', book_progress_id=book_progress.id) }}">[X]</a>
-          </li>
+            <a class="listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}
+            {% set tags = book.tags|join(", ", "name") %}{% if tags %}[{{ tags }}]{% endif %}
+            <br/>
+            <img loading="lazy" class="index-cover" src="{{ 'static/cover-' + book.id|string + '.jpg' }}"/></a>
+            <br/>
+            {{ progress }}&nbsp;&nbsp;-&nbsp;&nbsp;<i>{{ updated_datetime_str }}</i>&nbsp;&nbsp;<a href="{{ url_for('remove_progress', book_progress_id=book_progress.id) }}">[X]</a>
+            <br/>
+            <br/>
+          </div>
         {% endfor %}
-      </ul>
-    {% endif %}
-    {% if unread_books %}
+      </div>
+      </center>
+      {% endif %}
+      {% if unread_books %}
       <h1>Unread</h1>
-      <ul class="columns">
-        {% for book in unread_books %}
-          <li>
-            <a data-image="{{ 'static/cover-' + book.id|string + '.jpg' }}" class="hover-text listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
-          </li>
-        {% endfor %}
-      </ul>
+      <center>
+        <div class="columns">
+          {% for book in unread_books %}
+            <div class="item">
+              {% if loop.index == 1 or book.author != unread_books[loop.index - 2].author %}
+                <h2>{{ book.author }}</h2>
+              {% endif %}
+          <a class="listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}
+          {% set tags = book.tags|join(", ", "name") %}{% if tags %}[{{ tags }}]{% endif %}
+          <br/>
+          <img loading="lazy" class="index-cover" src="{{ 'static/cover-' + book.id|string + '.jpg' }}"/></a>
+         <br/>
+         <br/>
+         </div>
+          {% endfor %}
+      </div>
+      </center>
     {% endif %}
     {% if finished_books %}
       <h1>Finished</h1>
-      <ul class="columns">
+      <div class="columns">
         {% for book in finished_books %}
-          <li>
-            <a data-image="{{ 'static/cover-' + book.id|string + '.jpg' }}" class="hover-text listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}</a>
-          </li>
-        {% endfor %}
-      </ul>
+          <div class="item">
+          <a data-image="{{ 'static/cover-' + book.id|string + '.jpg' }}" class="hover-text listitem" target="_blank" href="{{ url_for('continue_reading', book_id=book.id) }}">{{ book.title }}
+            <br/>
+            <img loading="lazy" class="index-cover" src="{{ 'static/cover-' + book.id|string + '.jpg' }}"/></a>
+            <br/>
+            <br/>
+          </div>
+          {% endfor %}
+      </div>
     {% endif %}
     <br/><br/>
     <script>

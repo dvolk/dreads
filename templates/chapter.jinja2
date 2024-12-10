@@ -10,6 +10,17 @@
         <a class="listitem" href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index + 1) }}" style="float: right;">Next Chapter</a>
       {% endif %}
     </div>
+    {% if chapter_index == 0 %}
+      <div>
+        <form method="POST" action="/add_tags">
+          <input name="book_id" type="hidden" value="{{ book_id }}">
+          <input name="tag_names" style="float: left; width: 80%" placeholder="comma separated tags here" value="{{ book.tags|join(', ', 'name') }}" >
+        </form>
+        <a style="float: right" href="/hide/{{ book_id }}">HIDE BOOK</a>
+      </div>
+      <br/>
+      <br/>
+    {% endif %}
 
     <div>
 {{ content | add_paragraph_ids | safe }}
