@@ -15,7 +15,7 @@
     <h1>Search</h1>
     <form method="GET">
       <center>
-        <input name="q" placeholder="search (eg: title:'Book Title' author:'Author Name' tag:fiction)" style="border-radius: 10px; padding: 6px; width: 95%" {% if q %}value="{{q|escape}}"{% endif %}>
+        <input name="q" placeholder="search (eg: title:'Book Title' author:'Author Name' tag:fiction tag:!sci-fi sort:!date)" style="border-radius: 10px; padding: 6px; width: 95%" {% if q %}value="{{q|escape}}"{% endif %}>
       </center>
     </form>
     {% if in_progress_books %}

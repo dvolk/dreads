@@ -376,12 +376,27 @@ def parse_query(text, default_key="title"):
 @app.route("/")
 @login_required
 def index():
-    books = Book.query.order_by(Book.author, Book.title)
+    books = Book.query
     q = request.args.get("q", "")
     filters = parse_query(q)
 
     if request.args.get("show_all") != "y":
         books = books.filter_by(is_hidden=False)
+
+    for filter_sort_date in filters.get("sort", []):
+        if filter_sort_date == "author":
+            books = books.order_by(Book.author, Book.title)
+        elif filter_sort_date == "!author":
+            books = books.order_by(Book.author.desc(), Book.title)
+        # we don't have date :(
+        elif filter_sort_date == "date":
+            books = books.order_by(Book.id)
+        elif filter_sort_date == "!date":
+            books = books.order_by(Book.id.desc())
+
+    # default sort by author name
+    if not filters.get("sort"):
+        books = books.order_by(Book.author, Book.title)
 
     # process search query for tags, author and title
     for filter_tag_name in filters.get("tag", []):
