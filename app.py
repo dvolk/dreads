@@ -246,6 +246,7 @@ def load_books():
         except Exception as e:
             print(filename)
             print(str(e))
+    process_covers()
 
 
 @app.route("/apply_settings")
