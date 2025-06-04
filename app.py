@@ -3,10 +3,10 @@ import json
 import os
 import secrets
 import threading
-import time
 import pathlib
 import collections
 import shlex
+import logging
 
 import argh
 import ebooklib
@@ -324,7 +324,7 @@ def hide(book_id):
     for p in BookProgress.query.filter_by(book_id=book_id):
         db.session.delete(p)
     db.session.commit()
-    return redirect("index")
+    return redirect(url_for("index"))
 
 
 def add_tags(book_id, tag_names):
