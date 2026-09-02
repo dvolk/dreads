@@ -21,6 +21,9 @@
   <body class="w3-black">
     <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
       <div style="border-radius: 10px;width: 300px;" class="w3-white w3-padding">
+        {% if error %}
+          <div style="color: red; margin-bottom: 10px;">{{ error }}</div>
+        {% endif %}
         <h2>
           <img style="position: relative; top: -4px;" height=45 src="{{ url_for('static', filename="cat-face_1f431.png") }}">
             reads

@@ -1,13 +1,15 @@
 {% extends 'base.jinja2' %}
 {% block content %}
   <body>
-    <div style="margin-bottom: 20px; display: flex; justify-content: space-between">
+    {% if chapter_index > 0 %}{% set prev_url = url_for('read_chapter', book_id=book_id, chapter_index=chapter_index - 1) %}{% endif %}
+    {% if chapter_index < total_chapters - 1 %}{% set next_url = url_for('read_chapter', book_id=book_id, chapter_index=chapter_index + 1) %}{% endif %}
+    <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: baseline">
       {% if chapter_index > 0 %}
-        <a class="listitem" href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index - 1) }}">Previous Chapter</a>
+        <a class="listitem" href="{{ prev_url }}">← Previous Chapter</a>
       {% endif %}
-      <a class="listitem" href="{{ url_for('index') }}" style="margin: 0 auto;">{{ title }}</a>
+      <a class="listitem" href="{{ url_for('index') }}" style="margin: 0 auto;">{{ title }} — Chapter {{ chapter_index + 1 }}{% if chapter.title != 'Chapter ' ~ (chapter_index + 1)|string %}: {{ chapter.title }}{% endif %}</a>
       {% if chapter_index < total_chapters - 1 %}
-        <a class="listitem" href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index + 1) }}" style="float: right;">Next Chapter</a>
+        <a class="listitem" href="{{ next_url }}">Next Chapter →</a>
       {% endif %}
     </div>
     {% if chapter_index == 0 %}
@@ -26,18 +28,20 @@
 {{ content | add_paragraph_ids | safe }}
     </div>
 
-    <div style="margin-top: 20px; display: flex; justify-content: space-between">
+    <div style="margin-top: 20px; display: flex; justify-content: space-between; align-items: baseline">
       {% if chapter_index > 0 %}
-        <a class="listitem" href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index - 1) }}">Previous Chapter</a>
+        <a class="listitem" href="{{ prev_url }}">← Previous Chapter</a>
       {% endif %}
       <a class="listitem" href="{{ url_for('index') }}" style="margin: 0 auto;">{{ title }}</a>
       {% if chapter_index < total_chapters - 1 %}
-        <a class="listitem" href="{{ url_for('read_chapter', book_id=book_id, chapter_index=chapter_index + 1) }}" style="float: right;">Next Chapter</a>
+        <a class="listitem" href="{{ next_url }}">Next Chapter →</a>
       {% endif %}
     </div>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
       let timer;
+      const prevUrl = "{% if prev_url %}{{ prev_url }}{% endif %}" || null;
+      const nextUrl = "{% if next_url %}{{ next_url }}{% endif %}" || null;
 
       function updateProgress() {
         // Find the first paragraph that is visible
@@ -69,11 +73,23 @@
         timer = setTimeout(updateProgress, 5000);
       });
 
+      // Keyboard navigation between chapters
+      document.addEventListener('keydown', function(e) {
+        const tag = (e.target && e.target.tagName) || '';
+        if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
+        if (e.key === 'ArrowLeft' && prevUrl) {
+          window.location.href = prevUrl;
+        } else if (e.key === 'ArrowRight' && nextUrl) {
+          window.location.href = nextUrl;
+        }
+      });
+
       // Scroll to saved paragraph
       const savedParagraphIndex = {{ book_progress.paragraph_index if book and book_progress else 0 }} - 1;
       const savedParagraph = document.getElementById('paragraph-' + savedParagraphIndex);
       if (savedParagraph) {
         savedParagraph.scrollIntoView();
+        updateProgress();
       }
     });
   </script>

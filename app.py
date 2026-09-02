@@ -1,6 +1,8 @@
 import datetime
 import json
+import logging
 import os
+import re
 import secrets
 import threading
 import time
@@ -121,17 +123,13 @@ def login():
         username = request.form.get("username")
         maybe_password = request.form.get("password")
 
-        user = User.query.filter_by(username=username).first_or_404()
+        user = User.query.filter_by(username=username).first()
 
-        if user.check_password(maybe_password):
-            print("okay")
+        if user and user.check_password(maybe_password):
             login_user(user)
             return redirect(url_for("index"))
-        else:
-            print("wrong password")
-            abort(404)
-    if request.method == "GET":
-        return render_template("login.jinja2")
+        return render_template("login.jinja2", error="Wrong username or password."), 401
+    return render_template("login.jinja2")
 
 
 @app.route("/logout")
@@ -185,15 +183,69 @@ def save_cover_image(book_id):
         with open(cover_path, "wb") as f:
             f.write(cover_item.get_content())
     else:
-        cover_path.symlink_to("no-cover.png")
+        cover_path.symlink_to(static_dir.resolve() / "no-cover.png")
         print(f"No cover image found for {book_path}.")
+
+
+def chapter_title(clean_content, index):
+    """Derive a chapter title from its first heading, if there is one."""
+    soup = BeautifulSoup(clean_content, "html.parser")
+    heading = soup.find(re.compile(r"^h[1-3]$"))
+    if heading:
+        title = heading.get_text(" ", strip=True)[:200]
+        if title:
+            return title
+    return f"Chapter {index + 1}"
+
+
+def extract_chapters(book_epub):
+    """Extract chapters in reading (spine) order with cleaned content.
+
+    Falls back to document-item order for epubs without a usable spine.
+    """
+    chapters = []
+    for entry in book_epub.spine or []:
+        item_id = entry[0] if isinstance(entry, (list, tuple)) else entry
+        item = book_epub.get_item_with_id(item_id)
+        if item and item.get_type() == ebooklib.ITEM_DOCUMENT:
+            chapters.append(item)
+    if not chapters:
+        chapters = [
+            item
+            for item in book_epub.get_items()
+            if item.get_type() == ebooklib.ITEM_DOCUMENT
+        ]
+
+    allowed_tags = list(sanitizer.ALLOWED_TAGS) + ["p", "img"]
+    processed_chapters = []
+    for index, chapter in enumerate(chapters):
+        content = chapter.get_content()
+        if isinstance(content, bytes):
+            content = content.decode(errors="ignore")
+        clean_content = clean(
+            content,
+            tags=allowed_tags,
+            strip=True,
+        )
+        processed_chapters.append(
+            Chapter(
+                index=index,
+                title=chapter_title(clean_content, index),
+                content=clean_content,
+            )
+        )
+    return processed_chapters
 
 
 def load_books():
     existing_filenames = {book.filename for book in Book.query.all()}
-    for filename in tqdm(os.listdir(BOOKS_DIR)):
+    for filename in tqdm(sorted(os.listdir(BOOKS_DIR))):
         try:
-            if filename.endswith(".epub") and filename not in existing_filenames:
+            if (
+                filename.endswith(".epub")
+                and filename not in existing_filenames
+                and os.path.isfile(os.path.join(BOOKS_DIR, filename))
+            ):
                 print(f"processing {filename}")
                 book_path = os.path.join(BOOKS_DIR, filename)
                 book_epub = epub.read_epub(book_path, {"ignore_ncx": True})
@@ -209,30 +261,7 @@ def load_books():
                     else "Unknown Author"
                 )
 
-                # Extract chapters
-                chapters = [
-                    item
-                    for item in book_epub.get_items()
-                    if item.get_type() == ebooklib.ITEM_DOCUMENT
-                ]
-                processed_chapters = []
-                allowed_tags = list(sanitizer.ALLOWED_TAGS) + ["p", "img"]
-                for index, chapter in enumerate(chapters):
-                    try:
-                        content = chapter.get_content().decode()
-                    except Exception:
-                        content = chapter.get_content()
-                    clean_content = clean(
-                        content,
-                        tags=allowed_tags,
-                        strip=True,
-                    )
-                    new_chapter = Chapter(
-                        index=index,
-                        title=f"Chapter {index + 1}",
-                        content=clean_content,
-                    )
-                    processed_chapters.append(new_chapter)
+                processed_chapters = extract_chapters(book_epub)
                 # Create a new Book entry
                 new_book = Book(
                     filename=filename,
@@ -253,8 +282,15 @@ def load_books():
 @login_required
 def apply_settings():
     session.permanent = True
-    session["zoom"] = request.args.get("zoom", 1)
-    session["color"] = request.args.get("color", "#000000")
+    try:
+        zoom = float(request.args.get("zoom", 1))
+    except ValueError:
+        zoom = 1
+    session["zoom"] = zoom
+    color = request.args.get("color", "#000000")
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+        color = "#000000"
+    session["color"] = color
     return redirect(url_for("index"))
 
 
@@ -318,19 +354,20 @@ def inject_globals():
 
 
 @app.route("/hide/<int:book_id>")
+@login_required
 def hide(book_id):
     book = Book.query.get_or_404(book_id)
     book.is_hidden = True
-    for p in BookProgress.query.filter_by(book_id=book_id):
+    for p in BookProgress.query.filter_by(book_id=book_id, user_id=current_user.id):
         db.session.delete(p)
     db.session.commit()
-    return redirect("index")
+    return redirect(url_for("index"))
 
 
 def add_tags(book_id, tag_names):
     with app.app_context():
         book = Book.query.filter_by(id=book_id).first()
-        tag_names = [tn.strip() for tn in tag_names.split(",")]
+        tag_names = [tn.strip() for tn in tag_names.split(",") if tn.strip()]
         # go through user-supplied tags and add tags to books, creating
         # new tags if they don't already exist
         book.tags = []
@@ -359,8 +396,8 @@ def parse_query(text, default_key="title"):
     out = collections.defaultdict(list)
     try:
         tokens = shlex.split(text)
-    except ValueError as e:
-        logging.exception("Error parsing query: ")
+    except ValueError:
+        logging.exception("Error parsing query: %r", text)
         return out
 
     for token in tokens:
@@ -443,8 +480,8 @@ def index():
                     (now - book_progress.updated_datetime, book, book_progress)
                 )
 
-    # sort by last read
-    in_progress_books = sorted(in_progress_books, key=lambda bb: bb[0])
+    # most recently read first
+    in_progress_books = sorted(in_progress_books, key=lambda bb: bb[0], reverse=True)
 
     return render_template(
         "index.jinja2",
@@ -475,8 +512,6 @@ def read_chapter(book_id, chapter_index):
         db.session.add(progress)
     else:
         if chapter_index != progress.chapter_index:
-            print(chapter_index, progress.chapter_index, progress.paragraph_index)
-            print("resetting paragraph progress")
             progress.paragraph_index = 0
         progress.chapter_index = chapter_index
         progress.updated_datetime = datetime.datetime.utcnow()
@@ -486,6 +521,7 @@ def read_chapter(book_id, chapter_index):
     return render_template(
         "chapter.jinja2",
         title=book.title,
+        chapter=chapter,
         content=chapter.content,
         book_id=book_id,
         book_progress=progress,
@@ -525,7 +561,7 @@ def trigger_load_books():
     return redirect(url_for("index"))
 
 
-def run_app(debug=False):
+def run_app(debug=False, interface="127.0.0.1"):
     def load_books_thread():
         while True:
             with app.app_context():
@@ -534,10 +570,10 @@ def run_app(debug=False):
             load_books_event.clear()
 
     if debug:
-        app.run(port=5438, debug=True)
+        app.run(host=interface, port=5438, debug=True)
     else:
         threading.Thread(target=load_books_thread, daemon=True).start()
-        waitress.serve(app, port=5438)
+        waitress.serve(app, host=interface, port=5438)
 
 
 def process_cover(book_id):
@@ -549,6 +585,67 @@ def process_covers():
     with app.app_context():
         for book in Book.query.all():
             process_cover(book.id)
+
+
+def remap_chapter_index(old_content, new_chapters):
+    """Find the new spine index of an old chapter, by content."""
+    if old_content is None:
+        return None
+    for c in new_chapters:
+        if c.content == old_content:
+            return c.index
+    prefix = old_content[:100]
+    for c in new_chapters:
+        if c.content[:100] == prefix:
+            return c.index
+    return None
+
+
+def reimport_book(book_id):
+    """Re-extract a book's chapters in spine order, preserving reading progress."""
+    with app.app_context():
+        book = Book.query.get_or_404(book_id)
+        book_path = os.path.join(BOOKS_DIR, book.filename)
+        book_epub = epub.read_epub(book_path, {"ignore_ncx": True})
+        new_chapters = extract_chapters(book_epub)
+
+        old_content_by_index = {c.index: c.content for c in book.chapters}
+        remapped = 0
+        for p in BookProgress.query.filter_by(book_id=book.id).all():
+            new_index = remap_chapter_index(
+                old_content_by_index.get(p.chapter_index), new_chapters
+            )
+            if new_index is None:
+                new_index = max(len(new_chapters) - 1, 0)
+            if new_index != p.chapter_index:
+                p.chapter_index = new_index
+                p.paragraph_index = 0
+                remapped += 1
+
+        for c in list(book.chapters):
+            db.session.delete(c)
+        for c in new_chapters:
+            c.book_id = book.id
+            db.session.add(c)
+        book.chapters_count = len(new_chapters)
+        db.session.commit()
+        return (
+            f"book {book_id} ({book.title!r}): {len(new_chapters)} chapters, "
+            f"{remapped} progress row(s) remapped"
+        )
+
+
+def reimport_all():
+    failures = []
+    with app.app_context():
+        for book in Book.query.order_by(Book.id).all():
+            try:
+                print(reimport_book(book.id))
+            except Exception as e:
+                failures.append((book.id, book.filename))
+                print(f"FAILED book {book.id} ({book.filename}): {e}")
+    if failures:
+        print(f"{len(failures)} book(s) failed: {[bid for bid, _ in failures]}")
 
 
 def attr_join(xs, attr=None, sep=","):
@@ -565,12 +662,12 @@ def show_books():
                     [
                         book.id,
                         book.is_hidden,
-                        book.author[:20],
-                        book.title[:40],
+                        book.author,
+                        book.title,
                         book_tags_str,
                     ]
                 )
-    print(tabulate.tabulate(ret))
+    print(tabulate.tabulate(ret, tablefmt='orgtbl'))
 
 
 if __name__ == "__main__":
@@ -581,5 +678,7 @@ if __name__ == "__main__":
             process_covers,
             show_books,
             add_tags,
+            reimport_book,
+            reimport_all,
         ]
     )

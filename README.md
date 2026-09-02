@@ -47,6 +47,13 @@ Copy epub ebooks to ./epub
 
 ## Run the app
 
-    env/bin/python app.py
+    env/bin/python app.py run-app
 
 and browse to http://127.0.0.1:5438
+
+## Other commands
+
+    env/bin/python app.py add-tags <book_id> "tag1, tag2"   # tag a book
+    env/bin/python app.py reimport-all                      # re-extract chapters in reading order
+    env/bin/python app.py show-books                        # list books with no tags
+    env/bin/python test_app.py                              # smoke test the routes
