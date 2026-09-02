@@ -5,10 +5,10 @@ import os
 import re
 import secrets
 import threading
-import time
 import pathlib
 import collections
 import shlex
+import logging
 
 import argh
 import ebooklib
