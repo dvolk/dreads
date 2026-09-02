@@ -2,6 +2,7 @@ import datetime
 import json
 import logging
 import os
+import posixpath
 import re
 import secrets
 import threading
@@ -15,7 +16,7 @@ import humanize
 from bleach import clean, sanitizer
 from bs4 import BeautifulSoup
 from ebooklib import epub
-from flask import Flask, redirect, render_template, request, session, url_for, abort
+from flask import Flask, redirect, render_template, request, session, url_for, abort, send_from_directory
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from tqdm import tqdm
@@ -197,10 +198,32 @@ def chapter_title(clean_content, index):
     return f"Chapter {index + 1}"
 
 
-def extract_chapters(book_epub):
+# structural tags beyond bleach's minimal default set, so EPUB content
+# (headings, tables, line breaks, ...) survives with plain browser styling
+EXTRA_TAGS = [
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "br", "hr", "div", "span",
+    "table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td",
+    "figure", "figcaption",
+    "pre", "sub", "sup", "s", "u", "wbr", "dfn", "kbd", "q", "samp",
+    "small", "ins", "del", "cite",
+]
+
+ALLOWED_ATTRIBUTES = {
+    **sanitizer.ALLOWED_ATTRIBUTES,
+    "a": ["href", "target", "rel"],
+    "img": ["src", "alt"],
+}
+
+
+def extract_chapters(book_epub, book_id):
     """Extract chapters in reading (spine) order with cleaned content.
 
-    Falls back to document-item order for epubs without a usable spine.
+    - keeps structural tags (headings, tables, lists, ...)
+    - saves inline images to instance/images/<book_id>/ and rewrites their
+      src to a served URL
+    - rewrites links to other chapters to /book/<id>/chapter/<n>
+    - external links open in a new tab; dead internal links become plain text
     """
     chapters = []
     for entry in book_epub.spine or []:
@@ -215,15 +238,99 @@ def extract_chapters(book_epub):
             if item.get_type() == ebooklib.ITEM_DOCUMENT
         ]
 
-    allowed_tags = list(sanitizer.ALLOWED_TAGS) + ["p", "img"]
+    # all items by (lowercased) file path, for resolving image/link targets
+    items_by_path = {}
+    for item in book_epub.get_items():
+        name = item.file_name
+        if name:
+            items_by_path.setdefault(name.lower(), item)
+    path_to_index = {
+        c.file_name.lower(): i
+        for i, c in enumerate(chapters)
+        if c.file_name
+    }
+
+    image_dir = pathlib.Path("instance") / "images" / str(book_id)
+    image_dir.mkdir(parents=True, exist_ok=True)
+    saved_images = {}
+    seq = 0
+
+    def resolve(ref, base_dir):
+        """Resolve an EPUB-internal reference to its item, or None."""
+        ref = (ref or "").strip()
+        if not ref or ref.startswith(
+            (
+                "#", "http://", "https://", "data:", "mailto:",
+                "ftp:", "javascript:", "tel:",
+            )
+        ):
+            return None
+        ref = ref.split("#", 1)[0]
+        if not ref:
+            return None
+        ref = ref.lstrip("/")
+        resolved = posixpath.normpath(posixpath.join(base_dir, ref)).lower()
+        return items_by_path.get(resolved)
+
+    def save_image(item):
+        nonlocal seq
+        key = (item.file_name or "").lower()
+        if key not in saved_images:
+            seq += 1
+            base = os.path.basename(key)
+            base = re.sub(r"[^A-Za-z0-9._-]", "_", base) or "image"
+            with open(image_dir / f"{seq:03d}_{base}", "wb") as f:
+                f.write(item.get_content())
+            saved_images[key] = f"{seq:03d}_{base}"
+        return saved_images[key]
+
+    allowed_tags = list(sanitizer.ALLOWED_TAGS) + EXTRA_TAGS + ["p", "img"]
     processed_chapters = []
     for index, chapter in enumerate(chapters):
         content = chapter.get_content()
         if isinstance(content, bytes):
             content = content.decode(errors="ignore")
+        soup = BeautifulSoup(content, "html.parser")
+        base_dir = posixpath.dirname(chapter.file_name or "")
+
+        for img in soup.find_all("img"):
+            src = (img.get("src") or "").strip()
+            if not src or src.startswith(("http://", "https://", "data:")):
+                if not src:
+                    img.decompose()
+                continue
+            item = resolve(src, base_dir)
+            if item is None:
+                img.decompose()
+                continue
+            img.attrs = {
+                "src": f"/book_images/{book_id}/{save_image(item)}",
+                "alt": img.get("alt") or "",
+            }
+
+        for a in soup.find_all("a", href=True):
+            href = a["href"].strip()
+            if href.startswith(("http://", "https://")):
+                a["target"] = "_blank"
+                a["rel"] = "noopener noreferrer"
+                continue
+            if not href or href.startswith(
+                ("#", "mailto:", "tel:", "ftp:")
+            ):
+                continue
+            if href.startswith("javascript:"):
+                a.unwrap()
+                continue
+            target = resolve(href, base_dir)
+            if target is None or (target.file_name or "").lower() not in path_to_index:
+                a.unwrap()
+                continue
+            a["href"] = f"/book/{book_id}/chapter/{path_to_index[target.file_name.lower()]}"
+
         clean_content = clean(
-            content,
+            soup.decode(),
             tags=allowed_tags,
+            attributes=ALLOWED_ATTRIBUTES,
             strip=True,
         )
         processed_chapters.append(
@@ -260,16 +367,20 @@ def load_books():
                     else "Unknown Author"
                 )
 
-                processed_chapters = extract_chapters(book_epub)
-                # Create a new Book entry
+                # Create a new Book entry (needs a row before extraction,
+                # which stores images under instance/images/<book_id>/)
                 new_book = Book(
                     filename=filename,
                     title=title,
                     author=author,
-                    chapters=processed_chapters,
-                    chapters_count=len(processed_chapters),
+                    chapters_count=0,
                 )
                 db.session.add(new_book)
+                db.session.commit()
+
+                processed_chapters = extract_chapters(book_epub, new_book.id)
+                new_book.chapters = processed_chapters
+                new_book.chapters_count = len(processed_chapters)
                 db.session.commit()
         except Exception as e:
             print(filename)
@@ -530,6 +641,15 @@ def read_chapter(book_id, chapter_index):
     )
 
 
+@app.route("/book_images/<int:book_id>/<path:filename>")
+@login_required
+def book_image(book_id, filename):
+    Book.query.get_or_404(book_id)
+    return send_from_directory(
+        pathlib.Path("instance") / "images" / str(book_id), filename
+    )
+
+
 @app.route("/remove_progress/<int:book_progress_id>")
 @login_required
 def remove_progress(book_progress_id):
@@ -586,17 +706,29 @@ def process_covers():
             process_cover(book.id)
 
 
-def remap_chapter_index(old_content, new_chapters):
-    """Find the new spine index of an old chapter, by content."""
+def chapter_text(content):
+    text = BeautifulSoup(content, "html.parser").get_text(" ", strip=True)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def remap_chapter_index(old_content, new_texts):
+    """Find the new spine index of an old chapter, by visible text.
+
+    new_texts is a list of (index, text) pairs. The extraction pipeline can
+    change markup between imports, so match on stripped text, not markup.
+    """
     if old_content is None:
         return None
-    for c in new_chapters:
-        if c.content == old_content:
-            return c.index
-    prefix = old_content[:100]
-    for c in new_chapters:
-        if c.content[:100] == prefix:
-            return c.index
+    old_text = chapter_text(old_content)
+    if not old_text:
+        return None
+    for index, text in new_texts:
+        if text == old_text:
+            return index
+    prefix = old_text[:200]
+    for index, text in new_texts:
+        if text.startswith(prefix):
+            return index
     return None
 
 
@@ -606,16 +738,18 @@ def reimport_book(book_id):
         book = Book.query.get_or_404(book_id)
         book_path = os.path.join(BOOKS_DIR, book.filename)
         book_epub = epub.read_epub(book_path, {"ignore_ncx": True})
-        new_chapters = extract_chapters(book_epub)
+        new_chapters = extract_chapters(book_epub, book.id)
+        new_texts = [(c.index, chapter_text(c.content)) for c in new_chapters]
 
         old_content_by_index = {c.index: c.content for c in book.chapters}
         remapped = 0
         for p in BookProgress.query.filter_by(book_id=book.id).all():
             new_index = remap_chapter_index(
-                old_content_by_index.get(p.chapter_index), new_chapters
+                old_content_by_index.get(p.chapter_index), new_texts
             )
             if new_index is None:
-                new_index = max(len(new_chapters) - 1, 0)
+                # best effort: keep the old position if it still exists
+                new_index = min(p.chapter_index, len(new_chapters) - 1)
             if new_index != p.chapter_index:
                 p.chapter_index = new_index
                 p.paragraph_index = 0

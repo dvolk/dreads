@@ -19,6 +19,7 @@
 * Change entire app zoom per-session.
 * Change the background color per-session.
 * Multi-user with shared books and separate reading progress.
+* Renders EPUB content: inline images, links between chapters, headings, tables.
 
 ## Installation
 

@@ -11,6 +11,8 @@ context blocks.
 
 Run with: env/bin/python test_app.py
 """
+import re
+
 from sqlalchemy import text
 
 from app import app, db, Book, BookProgress, Tag, User
@@ -104,6 +106,54 @@ def run_tests(client, book_id, user_id):
     assert "paragraph-0" in r.data.decode(errors="ignore"), (
         "paragraph ids should be injected"
     )
+
+    # --- inline images: rewritten to served URLs, and the route works ---
+    with app.app_context():
+        row = db.session.execute(
+            text(
+                "SELECT book_id, content FROM chapter "
+                "WHERE content LIKE '%/book_images/%' LIMIT 1"
+            )
+        ).first()
+    assert row is not None, "expected at least one chapter with an inline image"
+    content = row[1]
+    img_src = re.search(r'<img[^>]+src="(/book_images/\d+/[^"]+)"', content).group(1)
+    r = client.get(img_src)
+    assert r.status_code == 200, f"image route: {r.status_code}"
+    assert r.content_type.startswith("image/"), f"content type: {r.content_type}"
+    anon = app.test_client()
+    r = anon.get(img_src)
+    assert r.status_code in (302, 303), "anonymous image access should redirect"
+    assert "login" in r.headers.get("Location", "").lower()
+    assert client.get("/book_images/99999999/x.jpg").status_code == 404
+
+    # --- internal links: rewritten to chapter URLs that actually load ---
+    with app.app_context():
+        row = db.session.execute(
+            text(
+                "SELECT book_id, content FROM chapter "
+                "WHERE content LIKE '%/book/%/chapter/%' LIMIT 1"
+            )
+        ).first()
+        dead = db.session.execute(
+            text("SELECT COUNT(*) FROM chapter WHERE content LIKE '%.xhtml%'")
+        ).scalar()
+    assert row is not None, "expected at least one chapter with an internal link"
+    target = re.search(r'href="(/book/\d+/chapter/\d+)"', row[1]).group(1)
+    r = client.get(target)
+    assert r.status_code == 200, f"internal link target: {r.status_code}"
+    assert dead == 0, f"{dead} chapters still reference .xhtml files"
+
+    # --- headings survive extraction somewhere in the library ---
+    with app.app_context():
+        has_heading = db.session.execute(
+            text(
+                "SELECT COUNT(*) FROM chapter "
+                "WHERE content LIKE '%<h1%' OR content LIKE '%<h2%'"
+                " OR content LIKE '%<h3%'"
+            )
+        ).scalar()
+    assert has_heading > 0, "expected headings to survive extraction"
 
     # --- progress update ---
     r = client.post(
