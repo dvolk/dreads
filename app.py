@@ -8,7 +8,6 @@ import threading
 import pathlib
 import collections
 import shlex
-import logging
 
 import argh
 import ebooklib
