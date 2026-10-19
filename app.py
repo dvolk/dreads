@@ -44,6 +44,7 @@ migrate = Migrate(app, db)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 load_books_event = threading.Event()
+INDEX_TEMPLATES = {"list": "index.jinja2", "grid": "index-grid.jinja2"}
 
 book_tags = db.Table(
     "book_tags",
@@ -397,10 +398,22 @@ def apply_settings():
     except ValueError:
         zoom = 1
     session["zoom"] = zoom
+    # fraction of the page width eaten by the two side margins: 0.5 leaves the
+    # content half the page
+    try:
+        margin = float(request.args.get("margin", 0))
+    except ValueError:
+        margin = 0
+    session["margin"] = min(max(margin, 0), 0.9)
     color = request.args.get("color", "#000000")
     if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
         color = "#000000"
     session["color"] = color
+    # the settings form always submits a layout; only act on it when present so
+    # older links/bookmarks do not silently reset a user's choice
+    layout = request.args.get("layout")
+    if layout is not None:
+        session["layout"] = layout if layout in INDEX_TEMPLATES else "list"
     return redirect(url_for("index"))
 
 
@@ -455,10 +468,15 @@ def add_paragraph_ids(content):
     return soup.prettify()
 
 
+def get_opposite_color(color):
+    return "black" if color == "white" else "white"
+
+
 @app.context_processor
 def inject_globals():
     return {
         "get_contrast_color": get_contrast_color,
+        "get_opposite_color": get_opposite_color,
         "add_paragraph_ids": add_paragraph_ids,
     }
 
@@ -593,13 +611,17 @@ def index():
     # most recently read first
     in_progress_books = sorted(in_progress_books, key=lambda bb: bb[0], reverse=True)
 
+    layout = session.get("layout", "list")
+    if layout not in INDEX_TEMPLATES:
+        layout = "list"
     return render_template(
-        "index.jinja2",
+        INDEX_TEMPLATES[layout],
         unread_books=unread_books,
         finished_books=finished_books,
         in_progress_books=in_progress_books,
         humanize=humanize,
         q=q,
+        layout=layout,
     )
 
 

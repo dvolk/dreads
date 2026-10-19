@@ -20,12 +20,22 @@
       .item { break-inside: avoid; }
       a { text-decoration: none; }
       a.listitem:hover { font-weight: bold; }
-      body { zoom: {{ session.get("zoom", 1) }}; }
+      {% set margin = session.get("margin", 0) %}
+      body {
+        zoom: {{ session.get("zoom", 1) }};
+        max-width: {{ ((1 - margin) * 100)|round|int }}%;
+        margin: 0 auto;
+        padding: 10px;
+      }
       * {
         {% set user_color = session.get("color", '#000000') %}
         background-color: {{ user_color  }};
         color: {{ get_contrast_color(user_color) }};
       }
+      /* the root background is what shows through in the side gutters, so it
+         gets the opposite of the text colour; body paints its own box back to
+         the page colour */
+      html { background-color: {{ get_opposite_color(get_contrast_color(user_color)) }}; }
       .inverse-color {
         color: {{ user_color  }};
         background-color: {{ get_contrast_color(user_color) }};
@@ -34,9 +44,26 @@
       .hover-text {
         cursor: pointer;
       }
+      #hover-tip {
+        position: fixed;
+        display: none;
+        max-width: 320px;
+        padding: 4px 8px;
+        pointer-events: none;
+        z-index: 1000;
+        border: {{ get_contrast_color(user_color) }} solid 1px;
+        box-shadow: 2px 2px 8px rgba(0,0,0,0.5);
+      }
       .index-cover {
         width: 400px;
         min-height: 400px;
+        border: {{ get_contrast_color(user_color) }} solid 1px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+      }
+      .columns.compact { column-width: 170px; }
+      .grid-cover {
+        width: 100%;
+        display: block;
         border: {{ get_contrast_color(user_color) }} solid 1px;
         box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
       }

@@ -1,0 +1,44 @@
+{% extends 'base.jinja2' %}
+{% block content %}
+  <body>
+    {% include '_index_controls.jinja2' %}
+    {% if in_progress_books %}
+      <h1>In progress</h1>
+      <div class="columns compact">
+        {% for updated, book, book_progress in in_progress_books %}
+          <div class="item">
+            <a class="hover-text listitem" target="_blank" data-title="{{ book.author }} - {{ book.title }}" href="{{ url_for('continue_reading', book_id=book.id) }}">
+              <img loading="lazy" class="grid-cover" alt="{{ book.title }}" src="{{ 'static/cover-' + book.id|string + '.jpg' }}"/></a>
+            <br/>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if unread_books %}
+      <h1>Unread</h1>
+      <div class="columns compact">
+        {% for book in unread_books %}
+          <div class="item">
+            <a class="hover-text listitem" target="_blank" data-title="{{ book.author }} - {{ book.title }}" href="{{ url_for('continue_reading', book_id=book.id) }}">
+              <img loading="lazy" class="grid-cover" alt="{{ book.title }}" src="{{ 'static/cover-' + book.id|string + '.jpg' }}"/></a>
+            <br/>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if finished_books %}
+      <h1>Finished</h1>
+      <div class="columns compact">
+        {% for book in finished_books %}
+          <div class="item">
+            <a class="hover-text listitem" target="_blank" data-title="{{ book.author }} - {{ book.title }}" href="{{ url_for('continue_reading', book_id=book.id) }}">
+              <img loading="lazy" class="grid-cover" alt="{{ book.title }}" src="{{ 'static/cover-' + book.id|string + '.jpg' }}"/></a>
+            <br/>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    <br/><br/>
+    {% include '_index_scripts.jinja2' %}
+  </body>
+{% endblock %}

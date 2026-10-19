@@ -83,6 +83,70 @@ def run_tests(client, book_id, user_id):
     assert r.status_code == 200, f"garbage settings: {r.status_code}"
     r = client.get("/apply_settings?zoom=1&color=%23000000", follow_redirects=True)
     assert r.status_code == 200
+    # both sliders step by 0.05
+    assert b'name="zoom" type="range" min="0.5" max="1.5" step="0.05"' in r.data, (
+        "zoom slider should step by 0.05"
+    )
+    assert b'name="margin" type="range" min="0" max="0.9" step="0.05"' in r.data, (
+        "margin slider should step by 0.05"
+    )
+    r = client.get("/apply_settings?zoom=1.25&color=%23000000", follow_redirects=True)
+    assert b"zoom: 1.25" in r.data, "half-step zoom values should be accepted"
+
+    # --- index layout: grid shows covers without titles ---
+    r = client.get(
+        "/apply_settings?zoom=1&color=%23000000&layout=grid", follow_redirects=True
+    )
+    assert r.status_code == 200, f"grid layout: {r.status_code}"
+    html = r.data.decode(errors="ignore")
+    assert 'class="columns compact"' in html, "grid layout should use compact columns"
+    assert 'class="grid-cover"' in html, "grid layout should render covers"
+    assert 'data-title="' in html, "grid covers should carry a hover label"
+    assert "<h2>" not in html, "grid layout should not show author headings"
+    assert 'id="hover-tip"' in html, "grid layout should have the text tooltip"
+    assert 'name="layout"' in html, "layout switch should be in the settings form"
+    assert '<option value="grid" selected>' in html, "grid should be the selected layout"
+    # --- a settings submit without a layout keeps the previous choice ---
+    r = client.get("/apply_settings?zoom=1&color=%23000000", follow_redirects=True)
+    assert b'columns compact' in r.data, "layout should persist across settings submits"
+    # --- an unknown layout falls back to the list template ---
+    r = client.get("/apply_settings?layout=notalayout", follow_redirects=True)
+    assert r.status_code == 200
+    assert b"columns compact" not in r.data, "unknown layout should fall back to list"
+    assert b'class="index-cover"' in r.data, "list layout should still render covers"
+
+    # --- side margins: 0.5 leaves the content half the page wide ---
+    r = client.get("/apply_settings?margin=0.5", follow_redirects=True)
+    assert r.status_code == 200, f"margin setting: {r.status_code}"
+    assert b"max-width: 50%" in r.data, "margin 0.5 should halve the content width"
+    assert b"html { background-color: black; }" in r.data, (
+        "gutters should be the opposite of the text colour"
+    )
+    assert b"padding: 10px" in r.data, "content should be padded off the gutters"
+    # half-size margin steps still land on whole percentages
+    r = client.get("/apply_settings?margin=0.35", follow_redirects=True)
+    assert b"max-width: 65%" in r.data, "0.05 margin steps should take effect"
+    # the gutter colour follows the text colour, not the page colour
+    r = client.get("/apply_settings?color=%23ffffff", follow_redirects=True)
+    assert b"html { background-color: white; }" in r.data, (
+        "white page has black text, so gutters should be white"
+    )
+    r = client.get("/apply_settings?color=%231a1a2e", follow_redirects=True)
+    assert b"html { background-color: black; }" in r.data, (
+        "dark blue page has white text, so gutters should be black"
+    )
+    r = client.get("/apply_settings?margin=0.5&color=%23000000", follow_redirects=True)
+    r = client.get(f"/book/{book_id}/chapter/0")
+    assert b"max-width: 50%" in r.data, "chapter page should honour the margin"
+    # the login page is standalone and stays full width
+    assert b"max-width" not in client.get("/login").data, "login should have no margin"
+    # out of range and garbage values stay sane
+    r = client.get("/apply_settings?margin=5", follow_redirects=True)
+    assert b"max-width: 10%" in r.data, "margin should clamp at 0.9 (content 10% wide)"
+    r = client.get("/apply_settings?margin=-1", follow_redirects=True)
+    assert b"max-width: 100%" in r.data, "negative margin should clamp at 0"
+    r = client.get("/apply_settings?margin=abc", follow_redirects=True)
+    assert b"max-width: 100%" in r.data, "garbage margin should mean no margin"
 
     # --- chapter page (chapter 0 must render with a real title) ---
     r = client.get(f"/book/{book_id}/chapter/0")

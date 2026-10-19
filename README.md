@@ -17,7 +17,9 @@
 * Show in-progress and finished books.
 * Remembers which chapter and paragraph you were on.
 * Change entire app zoom per-session.
+* Add left/right page margins per-session (0 = full width, 0.5 = content half the page).
 * Change the background color per-session.
+* Two book index layouts per-session: a list with large covers and titles, or a compact cover grid (title on hover).
 * Multi-user with shared books and separate reading progress.
 * Renders EPUB content: inline images, links between chapters, headings, tables.
 

@@ -1,0 +1,53 @@
+    <img id="hover-image" style="position: fixed; display: none; width: 200px; pointer-events: none; z-index: 1000; box-shadow: 2px 2px 8px rgba(0,0,0,0.5);" src="" alt="">
+    <div id="hover-tip"></div>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        var form = document.getElementById("settingsform");
+        if (form) {
+          form.querySelectorAll("input[type='range'], input[type='color'], select").forEach(function (input) {
+            input.addEventListener("change", function () {
+              form.submit();
+            });
+          });
+          form.querySelector("input[type='submit']").style.display = "none";
+        }
+
+        const hoverImage = document.getElementById('hover-image');
+        const hoverTip = document.getElementById('hover-tip');
+
+        // The previews are position:fixed, so they need viewport coordinates
+        // (clientX/Y); pageX/Y would add the scroll offset on top. body zoom
+        // scales the offset too, so divide it back out.
+        function place(el, event) {
+          const zoom = parseFloat(getComputedStyle(document.body).zoom) || 1;
+          el.style.left = `${(event.clientX + 15) / zoom}px`;
+          el.style.top = `${(event.clientY + 15) / zoom}px`;
+        }
+
+        document.querySelectorAll('.hover-text').forEach(text => {
+          const previewImage = text.getAttribute('data-image');
+          const previewLabel = text.getAttribute('data-title');
+
+          text.addEventListener('mouseenter', () => {
+            if (previewImage) {
+              hoverImage.src = previewImage;
+              hoverImage.style.display = 'block';
+            }
+            if (previewLabel) {
+              hoverTip.textContent = previewLabel;
+              hoverTip.style.display = 'block';
+            }
+          });
+
+          text.addEventListener('mousemove', (event) => {
+            if (previewImage) place(hoverImage, event);
+            if (previewLabel) place(hoverTip, event);
+          });
+
+          text.addEventListener('mouseleave', () => {
+            hoverImage.style.display = 'none';
+            hoverTip.style.display = 'none';
+          });
+        });
+      });
+    </script>
