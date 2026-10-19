@@ -3,3 +3,4 @@ epub
 env
 instance
 static/cover-*
+.env.key
