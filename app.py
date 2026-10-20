@@ -347,7 +347,7 @@ def rate_limit_error(error):
     deduct_when=only_failed_logins,
 )
 def login():
-    if request.method == "GET":
+    if request.method in {"GET", "HEAD"}:
         if current_user.is_authenticated:
             return redirect(url_for("index"))
         return render_template("login.jinja2")

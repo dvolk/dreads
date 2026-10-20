@@ -60,6 +60,7 @@ def run_tests(client, book_id, user_id):
     # --- login ---
     r = client.get("/login")
     assert r.status_code == 200, f"login page: {r.status_code}"
+    assert client.head("/login").status_code == 200, "HEAD /login should be 200"
     token = csrf_token(client)
     assert b'name="csrf_token"' in r.data, "login form should carry a CSRF token"
     assert "catreads_session=" in r.headers.get("Set-Cookie", ""), (
