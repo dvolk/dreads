@@ -15,10 +15,14 @@
     {% if chapter_index == 0 %}
       <div>
         <form method="POST" action="/add_tags">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input name="book_id" type="hidden" value="{{ book_id }}">
           <input name="tag_names" style="float: left; width: 80%" placeholder="comma separated tags here" value="{{ book.tags|join(', ', 'name') }}" >
         </form>
-        <a style="float: right" href="/hide/{{ book_id }}">HIDE BOOK</a>
+        <form method="POST" action="/hide/{{ book_id }}" style="float: right">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="linkish" type="submit">HIDE BOOK</button>
+        </form>
       </div>
       <br/>
       <br/>
@@ -37,7 +41,7 @@
         <a class="listitem" href="{{ next_url }}">Next Chapter →</a>
       {% endif %}
     </div>
-    <script>
+    <script nonce="{{ csp_nonce }}">
     document.addEventListener('DOMContentLoaded', function() {
       let timer;
       const prevUrl = "{% if prev_url %}{{ prev_url }}{% endif %}" || null;
@@ -59,6 +63,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
           },
           body: JSON.stringify({
             book_id: {{ book_id }},

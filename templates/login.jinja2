@@ -29,14 +29,15 @@
             reads
         </h2>
         <form method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <Label>Username:
-            <input class="w3-input w3-pale-yellow w3-round" name="username">
+            <input class="w3-input w3-pale-yellow w3-round" name="username" maxlength="64" autocomplete="username" autofocus>
           </label>
 
           <div style="margin-bottom: 10px;"></div>
 
           <label>Password:
-            <input class="w3-input w3-pale-yellow w3-round" name="password" type="password">
+            <input class="w3-input w3-pale-yellow w3-round" name="password" type="password" maxlength="1024" autocomplete="current-password">
           </label>
 
           <br/>

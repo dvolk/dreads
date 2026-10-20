@@ -2,6 +2,8 @@
 <html>
   <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     {% if book and chapter_index is not none %}
       {% set title = book.author + " - " + book.title + " - Chapter " + (chapter_index + 1)|string %}
     {% else %}
@@ -10,6 +12,15 @@
     <title>{{ title }}</title>
     <style>
       button { border-radius: 5px; }
+      button.linkish {
+        background: none;
+        border: 0;
+        color: inherit;
+        cursor: pointer;
+        font: inherit;
+        padding: 0;
+        text-decoration: none;
+      }
       .columns-container {
         margin: auto;
       }

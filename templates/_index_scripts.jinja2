@@ -1,6 +1,6 @@
     <img id="hover-image" style="position: fixed; display: none; width: 200px; pointer-events: none; z-index: 1000; box-shadow: 2px 2px 8px rgba(0,0,0,0.5);" src="" alt="">
     <div id="hover-tip"></div>
-    <script>
+    <script nonce="{{ csp_nonce }}">
       document.addEventListener("DOMContentLoaded", function () {
         var form = document.getElementById("settingsform");
         if (form) {

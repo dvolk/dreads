@@ -1,11 +1,15 @@
 import datetime
-import json
+import hmac
 import logging
+import math
+import mimetypes
 import os
 import posixpath
 import re
 import secrets
+import sqlite3
 import threading
+import time
 import pathlib
 import collections
 import shlex
@@ -16,35 +20,139 @@ import humanize
 from bleach import clean, sanitizer
 from bs4 import BeautifulSoup
 from ebooklib import epub
-from flask import Flask, redirect, render_template, request, session, url_for, abort, send_from_directory
+from flask import (
+    Flask,
+    Response,
+    abort,
+    g,
+    jsonify,
+    make_response,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    session,
+    url_for,
+)
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
-from tqdm import tqdm
 from flask_login import (
     LoginManager,
     UserMixin,
+    current_user,
+    login_required,
     login_user,
     logout_user,
-    login_required,
-    current_user,
 )
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+from tqdm import tqdm
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 import waitress
 import tabulate
 
+WEAK_SECRET_KEYS = {
+    "supersecret",
+    "changeme",
+    "change-me",
+    "secret",
+    "password",
+    "test",
+    "dev",
+}
+
+
+def load_secret_key(flask_app):
+    """Return a strong signing key, ignoring weak env values.
+
+    A persisted instance/secret_key keeps sessions valid across restarts when
+    the deployment forgets to provide CATREADS_SECRET_KEY.
+    """
+    env_key = (os.environ.get("CATREADS_SECRET_KEY") or "").strip()
+    if len(env_key) >= 32 and env_key.lower() not in WEAK_SECRET_KEYS:
+        return env_key
+    if env_key:
+        logging.warning(
+            "Ignoring weak CATREADS_SECRET_KEY (must be at least 32 characters)"
+        )
+
+    key_path = pathlib.Path(flask_app.instance_path) / "secret_key"
+    try:
+        if key_path.is_file():
+            persisted = key_path.read_text(encoding="utf-8").strip()
+            if len(persisted) >= 32:
+                os.chmod(key_path, 0o600)
+                return persisted
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key = secrets.token_urlsafe(64)
+        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(key)
+        os.chmod(key_path, 0o600)
+        logging.warning("Generated a persistent secret key at %s", key_path)
+        return key
+    except OSError:
+        logging.exception(
+            "Could not persist a secret key; sessions will not survive restarts"
+        )
+        return secrets.token_urlsafe(64)
+
+
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///reader.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["SECRET_KEY"] = os.environ.get(
-    "CATREADS_SECRET_KEY", secrets.token_urlsafe(64)
-)
+app.config["SECRET_KEY"] = load_secret_key(app)
+app.config["SESSION_COOKIE_NAME"] = "catreads_session"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get(
+    "CATREADS_HTTPS", ""
+).lower() in {"1", "true", "yes", "on"}
+# Browsers cap cookie lifetime at 400 days, so this is the longest practical
+# "stay logged in" value. SESSION_REFRESH_EACH_REQUEST slides the expiry
+# forward on every visit, so an actively used session does not expire.
+app.config["PERMANENT_SESSION_LIFETIME"] = datetime.timedelta(days=400)
+app.config["SESSION_REFRESH_EACH_REQUEST"] = True
+app.config["MAX_CONTENT_LENGTH"] = 128 * 1024
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 99999999999
+
+# Flask only autoescapes .html/.xml/.svg by default, not .jinja2. Book
+# metadata and tags are EPUB/user-controlled, so escape every template; the
+# sanitized chapter body opts out explicitly with |safe.
+app.jinja_env.autoescape = True
+
+if os.environ.get("CATREADS_BEHIND_PROXY", "").lower() in {"1", "true", "yes", "on"}:
+    # nginx terminates TLS and overwrites X-Forwarded-For itself, so trust
+    # exactly one proxy hop for the client address and scheme. Do not trust
+    # X-Forwarded-Host; nginx already sets Host to the vhost name.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
+login_manager.session_protection = "strong"
 load_books_event = threading.Event()
 INDEX_TEMPLATES = {"list": "index.jinja2", "grid": "index-grid.jinja2"}
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    storage_uri="memory://",
+    headers_enabled=True,
+    swallow_errors=True,
+    default_limits=[],
+)
+
+
+@event.listens_for(Engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 book_tags = db.Table(
     "book_tags",
@@ -118,25 +226,158 @@ class User(db.Model, UserMixin):
         return check_password_hash(self.password_hash, maybe_password)
 
 
+CSRF_SESSION_KEY = "_csrf_token"
+CSRF_FORM_FIELD = "csrf_token"
+CSRF_HEADER = "X-CSRF-Token"
+
+# Hash checked for unknown usernames so a missing user takes as long as a
+# wrong password (no username enumeration by timing).
+DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_urlsafe(32))
+
+
+def login_account_key():
+    username = (request.form.get("username") or "").strip().casefold()[:64]
+    return f"{get_remote_address()}:{username}"
+
+
+def only_failed_logins(response):
+    return response.status_code == 401
+
+
+def get_csrf_token():
+    token = session.get(CSRF_SESSION_KEY)
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session[CSRF_SESSION_KEY] = token
+    return token
+
+
+def csrf_token_is_valid():
+    expected = session.get(CSRF_SESSION_KEY)
+    supplied = request.form.get(CSRF_FORM_FIELD) or request.headers.get(CSRF_HEADER)
+    return bool(expected and supplied and hmac.compare_digest(expected, supplied))
+
+
+@app.before_request
+def security_checks():
+    g.csp_nonce = secrets.token_urlsafe(16)
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not csrf_token_is_valid():
+        abort(400, description="Invalid or missing CSRF token")
+    if request.endpoint == "static":
+        filename = request.path.rsplit("/", 1)[-1]
+        # Covers reveal the library, so they need a session even though the
+        # rest of /static (css, fonts, the login logo) stays public.
+        if filename.startswith("cover-") and not current_user.is_authenticated:
+            abort(404)
+
+
+@app.after_request
+def security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault(
+        "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
+    )
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    response.headers.setdefault("X-Robots-Tag", "noindex, nofollow, noarchive")
+    nonce = getattr(g, "csp_nonce", "")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+        "object-src 'none'; base-uri 'none'; form-action 'self'; "
+        "frame-ancestors 'none'",
+    )
+    if request.is_secure:
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000"
+        )
+    if request.endpoint == "static":
+        if request.path.rsplit("/", 1)[-1].startswith("cover-"):
+            response.headers["Cache-Control"] = "private, no-store"
+    else:
+        response.headers.setdefault("Cache-Control", "no-store")
+        response.vary.add("Cookie")
+    return response
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    return Response("User-agent: *\nDisallow: /\n", mimetype="text/plain")
+
+
+@app.errorhandler(429)
+def rate_limit_error(error):
+    logging.warning(
+        "rate limit exceeded: %s", getattr(error, "description", "unknown")
+    )
+    original = error.get_response()
+    response = make_response(
+        render_template(
+            "login.jinja2", error="Too many attempts. Try again later."
+        ),
+        429,
+    )
+    for header in (
+        "Retry-After",
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-RateLimit-Reset",
+    ):
+        value = original.headers.get(header)
+        if value:
+            response.headers[header] = value
+    return response
+
+
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit(
+    "30 per 15 minutes",
+    methods=["POST"],
+    deduct_when=only_failed_logins,
+)
+@limiter.limit(
+    "10 per 15 minutes",
+    methods=["POST"],
+    key_func=login_account_key,
+    deduct_when=only_failed_logins,
+)
 def login():
-    if request.method == "POST":
-        username = request.form.get("username")
-        maybe_password = request.form.get("password")
-
-        user = User.query.filter_by(username=username).first()
-
-        if user and user.check_password(maybe_password):
-            login_user(user)
+    if request.method == "GET":
+        if current_user.is_authenticated:
             return redirect(url_for("index"))
-        return render_template("login.jinja2", error="Wrong username or password."), 401
-    return render_template("login.jinja2")
+        return render_template("login.jinja2")
+
+    username = (request.form.get("username") or "").strip()[:64]
+    maybe_password = (request.form.get("password") or "")[:1024]
+    client_ip = request.remote_addr or "unknown"
+
+    user = User.query.filter_by(username=username).first()
+    if user is None:
+        check_password_hash(DUMMY_PASSWORD_HASH, maybe_password)
+        password_ok = False
+    else:
+        password_ok = user.check_password(maybe_password)
+
+    if user is not None and password_ok:
+        session.clear()
+        session.permanent = True
+        login_user(user)
+        return redirect(url_for("index"))
+
+    logging.warning("failed login for %r from %s", username, client_ip)
+    return render_template("login.jinja2", error="Wrong username or password."), 401
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 @login_required
 def logout():
     logout_user()
+    session.clear()
     return redirect(url_for("login"))
 
 
@@ -145,7 +386,11 @@ def load_user(user_id):
     """
     This is called by flask-login on every request to load the user
     """
-    return User.query.filter_by(id=int(user_id)).first()
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    return db.session.get(User, user_id)
 
 
 BOOKS_DIR = "./epub"
@@ -304,6 +549,14 @@ def extract_chapters(book_epub, book_id):
             if item is None:
                 img.decompose()
                 continue
+            media_type = (getattr(item, "media_type", "") or "").lower()
+            if (
+                item.get_type()
+                not in (ebooklib.ITEM_IMAGE, ebooklib.ITEM_VECTOR)
+                and not media_type.startswith("image/")
+            ):
+                img.decompose()
+                continue
             img.attrs = {
                 "src": f"/book_images/{book_id}/{save_image(item)}",
                 "alt": img.get("alt") or "",
@@ -397,12 +650,16 @@ def apply_settings():
         zoom = float(request.args.get("zoom", 1))
     except ValueError:
         zoom = 1
+    if not math.isfinite(zoom) or not 0.5 <= zoom <= 1.5:
+        zoom = 1
     session["zoom"] = zoom
     # fraction of the page width eaten by the two side margins: 0.5 leaves the
     # content half the page
     try:
         margin = float(request.args.get("margin", 0))
     except ValueError:
+        margin = 0
+    if not math.isfinite(margin):
         margin = 0
     session["margin"] = min(max(margin, 0), 0.9)
     color = request.args.get("color", "#000000")
@@ -434,12 +691,29 @@ def get_contrast_color(bg_color):
 @app.route("/update_progress", methods=["POST"])
 @login_required
 def update_progress():
-    data = request.get_json()
-    book_id = data.get("book_id")
-    chapter_index = data.get("chapter_index")
-    paragraph_index = data.get("paragraph_index")
-    if book_id is None or chapter_index is None or paragraph_index is None:
-        return json.dumps({"error": "Invalid data"}), 400
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(error="Invalid data"), 400
+
+    values = []
+    for field in ("book_id", "chapter_index", "paragraph_index"):
+        value = data.get(field)
+        if isinstance(value, bool) or not isinstance(value, int):
+            return jsonify(error="Invalid data"), 400
+        values.append(value)
+    book_id, chapter_index, paragraph_index = values
+    if book_id < 1 or chapter_index < 0 or paragraph_index < 0:
+        return jsonify(error="Invalid data"), 400
+    if paragraph_index > 1_000_000:
+        return jsonify(error="Invalid data"), 400
+
+    if db.session.get(Book, book_id) is None:
+        return jsonify(error="Unknown book"), 404
+    chapter = Chapter.query.filter_by(
+        book_id=book_id, index=chapter_index
+    ).first()
+    if chapter is None:
+        return jsonify(error="Unknown chapter"), 400
 
     progress = BookProgress.query.filter_by(
         book_id=book_id, user_id=current_user.id
@@ -457,7 +731,7 @@ def update_progress():
         progress.paragraph_index = paragraph_index
         progress.updated_datetime = datetime.datetime.utcnow()
     db.session.commit()
-    return json.dumps({"status": "success"})
+    return jsonify(status="success")
 
 
 @app.template_filter("add_paragraph_ids")
@@ -478,10 +752,12 @@ def inject_globals():
         "get_contrast_color": get_contrast_color,
         "get_opposite_color": get_opposite_color,
         "add_paragraph_ids": add_paragraph_ids,
+        "csrf_token": get_csrf_token,
+        "csp_nonce": getattr(g, "csp_nonce", ""),
     }
 
 
-@app.route("/hide/<int:book_id>")
+@app.route("/hide/<int:book_id>", methods=["POST"])
 @login_required
 def hide(book_id):
     book = Book.query.get_or_404(book_id)
@@ -495,11 +771,19 @@ def hide(book_id):
 def add_tags(book_id, tag_names):
     with app.app_context():
         book = Book.query.filter_by(id=book_id).first()
-        tag_names = [tn.strip() for tn in tag_names.split(",") if tn.strip()]
+        if book is None:
+            return
+        names = []
+        for raw_name in tag_names.split(","):
+            name = re.sub(r"[\x00-\x1f\x7f]", "", raw_name).strip()[:50]
+            if name and name not in names:
+                names.append(name)
+            if len(names) >= 20:
+                break
         # go through user-supplied tags and add tags to books, creating
         # new tags if they don't already exist
         book.tags = []
-        for tag_name in tag_names:
+        for tag_name in names:
             existing_tag = Tag.query.filter_by(name=tag_name).first()
             if existing_tag and existing_tag not in list(book.tags):
                 book.tags.append(existing_tag)
@@ -511,9 +795,11 @@ def add_tags(book_id, tag_names):
 @app.route("/add_tags", methods=["POST"])
 @login_required
 def add_tags_route():
-    book_id = request.form.get("book_id")
+    book_id = request.form.get("book_id", type=int)
+    if book_id is None:
+        abort(400)
     Book.query.get_or_404(book_id)
-    tag_names = request.form.get("tag_names", "")
+    tag_names = request.form.get("tag_names", "")[:1000]
     add_tags(book_id, tag_names)
     return redirect(url_for("continue_reading", book_id=book_id))
 
@@ -525,7 +811,7 @@ def parse_query(text, default_key="title"):
     try:
         tokens = shlex.split(text)
     except ValueError:
-        logging.exception("Error parsing query: %r", text)
+        logging.warning("Error parsing query: %r", text[:200])
         return out
 
     for token in tokens:
@@ -543,7 +829,7 @@ def parse_query(text, default_key="title"):
 @login_required
 def index():
     books = Book.query
-    q = request.args.get("q", "")
+    q = (request.args.get("q") or "")[:500]
     filters = parse_query(q)
 
     if request.args.get("show_all") != "y":
@@ -667,12 +953,15 @@ def read_chapter(book_id, chapter_index):
 @login_required
 def book_image(book_id, filename):
     Book.query.get_or_404(book_id)
+    mime_type, _ = mimetypes.guess_type(filename)
+    if not mime_type or not mime_type.startswith("image/"):
+        abort(404)
     return send_from_directory(
         pathlib.Path("instance") / "images" / str(book_id), filename
     )
 
 
-@app.route("/remove_progress/<int:book_progress_id>")
+@app.route("/remove_progress/<int:book_progress_id>", methods=["POST"])
 @login_required
 def remove_progress(book_progress_id):
     book_progress = BookProgress.query.get_or_404(book_progress_id)
@@ -695,10 +984,20 @@ def continue_reading(book_id):
     )
 
 
-@app.route("/trigger_load_books")
+_load_trigger_lock = threading.Lock()
+_last_load_trigger = 0.0
+LOAD_TRIGGER_INTERVAL = 60
+
+
+@app.route("/trigger_load_books", methods=["POST"])
 @login_required
 def trigger_load_books():
-    load_books_event.set()
+    global _last_load_trigger
+    with _load_trigger_lock:
+        now = time.monotonic()
+        if now - _last_load_trigger >= LOAD_TRIGGER_INTERVAL:
+            load_books_event.set()
+            _last_load_trigger = now
     return redirect(url_for("index"))
 
 
@@ -711,6 +1010,14 @@ def run_app(debug=False, interface="127.0.0.1"):
             load_books_event.clear()
 
     if debug:
+        # The Werkzeug debugger is remote code execution if it ever answers a
+        # non-loopback request; require an explicit opt-in for that.
+        if interface not in {"127.0.0.1", "localhost", "::1"} and os.environ.get(
+            "CATREADS_ALLOW_REMOTE_DEBUG"
+        ) != "1":
+            raise SystemExit(
+                "Refusing to run the debug server on a non-loopback interface"
+            )
         app.run(host=interface, port=5438, debug=True)
     else:
         threading.Thread(target=load_books_thread, daemon=True).start()

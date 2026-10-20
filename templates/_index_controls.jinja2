@@ -13,8 +13,13 @@
       </select>
       <input style="vertical-align: middle; padding: 5px 10px; margin: 10px; background-color: steelblue; color: white; border: 0px;" type="Submit"/ value="Apply">
     </form>
-    <form action="/trigger_load_books">
+    <form action="/trigger_load_books" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input style="border-radius: 5px; vertical-align: middle; padding: 5px 10px; margin: 10px; background-color: steelblue; color: white; border: 0px;" type="Submit" value="Reload books"/>
+    </form>
+    <form action="/logout" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input style="border-radius: 5px; vertical-align: middle; padding: 5px 10px; margin: 10px; background-color: steelblue; color: white; border: 0px;" type="Submit" value="Log out"/>
     </form>
     <h1>Search</h1>
     <form method="GET">
