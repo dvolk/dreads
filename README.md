@@ -65,7 +65,7 @@ The app can be the only authentication boundary. It now includes:
 * A strict CSP, `nosniff`, `DENY` framing, no-referrer, and no-index headers.
 * EPUB content is still sanitized with bleach; the CSP is a second line of defence.
 * Book covers require a session, so the library is not enumerable from `/static/`.
-* Covers and inline book images are `private, max-age=86400`, so reloads use the browser cache without letting shared caches retain them.
+* Covers and inline book images are `private, max-age=86400, immutable`, so reloads use the browser cache without letting shared caches retain them.
 * Unknown usernames take the same time to reject as wrong passwords.
 * A weak or missing `CATREADS_SECRET_KEY` is ignored; a persistent 0600 key is
   generated under `instance/secret_key` instead.

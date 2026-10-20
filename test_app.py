@@ -99,8 +99,8 @@ def run_tests(client, book_id, user_id):
     assert app.config["PERMANENT_SESSION_LIFETIME"].days == 400, (
         "sessions should use the longest practical lifetime"
     )
-    assert app.config["SESSION_REFRESH_EACH_REQUEST"] is True, (
-        "active sessions should slide forward"
+    assert app.config["SESSION_REFRESH_EACH_REQUEST"] is False, (
+        "the session cookie must not be re-signed on every static request"
     )
     assert "Expires=" in r.headers.get("Set-Cookie", ""), (
         "the logged-in session cookie should be persistent"
@@ -119,6 +119,8 @@ def run_tests(client, book_id, user_id):
     assert "default-src 'self'" in r.headers.get("Content-Security-Policy", "")
     assert r.headers.get("Cache-Control") == "no-store"
     assert r.headers.get("X-Robots-Tag", "").startswith("noindex")
+    assert "Set-Cookie" in r.headers, "page views should slide the session expiry"
+    assert "Cookie" in r.headers.get("Vary", ""), "HTML pages vary by session"
 
     # --- .jinja2 templates must autoescape, not just .html ---
     with app.test_request_context("/login"):
@@ -259,8 +261,12 @@ def run_tests(client, book_id, user_id):
     r = client.get(img_src)
     assert r.status_code == 200, f"image route: {r.status_code}"
     assert r.content_type.startswith("image/"), f"content type: {r.content_type}"
-    assert r.headers.get("Cache-Control") == "private, max-age=86400", (
+    assert r.headers.get("Cache-Control") == "private, max-age=86400, immutable", (
         "book images should be privately cacheable"
+    )
+    assert "Set-Cookie" not in r.headers, "image responses must not re-sign the session"
+    assert "Cookie" not in r.headers.get("Vary", ""), (
+        "a Cookie Vary would invalidate every image cache entry"
     )
     anon = app.test_client()
     r = anon.get(img_src)
@@ -432,8 +438,15 @@ def run_tests(client, book_id, user_id):
         )
         r = client.get(cover_url)
         assert r.status_code == 200, "authenticated cover access should work"
-        assert r.headers.get("Cache-Control") == "private, max-age=86400", (
-            "covers should be privately cacheable"
+        assert (
+            r.headers.get("Cache-Control")
+            == "private, max-age=86400, immutable"
+        ), "covers should be privately cacheable"
+        assert "Set-Cookie" not in r.headers, (
+            "cover responses must not re-sign the session"
+        )
+        assert "Cookie" not in r.headers.get("Vary", ""), (
+            "a Cookie Vary would invalidate every cover cache entry"
         )
 
     # --- crawlers are told to stay out, on both the app and the headers ---

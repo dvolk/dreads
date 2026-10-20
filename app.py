@@ -37,6 +37,7 @@ from flask import (
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
+from flask.sessions import SecureCookieSessionInterface
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import (
     LoginManager,
@@ -114,10 +115,13 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = env_flag("CATREADS_HTTPS")
 # Browsers cap cookie lifetime at 400 days, so this is the longest practical
-# "stay logged in" value. SESSION_REFRESH_EACH_REQUEST slides the expiry
-# forward on every visit, so an actively used session does not expire.
+# "stay logged in" value. Page navigations slide the expiry forward, so an
+# actively used session does not expire.
 app.config["PERMANENT_SESSION_LIFETIME"] = datetime.timedelta(days=400)
-app.config["SESSION_REFRESH_EACH_REQUEST"] = True
+# Refreshing on every request re-signs the session cookie on static/image
+# responses too, which defeats browser caching. Slide the expiry explicitly
+# on page navigations instead.
+app.config["SESSION_REFRESH_EACH_REQUEST"] = False
 app.config["MAX_CONTENT_LENGTH"] = 128 * 1024
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 99999999999
 
@@ -276,6 +280,54 @@ def security_checks():
             abort(404)
 
 
+@app.before_request
+def refresh_page_session():
+    """Slide the session expiry on page views, not on cached assets."""
+    if (
+        request.method == "GET"
+        and request.endpoint not in {"static", "book_image"}
+        and current_user.is_authenticated
+    ):
+        session.permanent = True
+        session.modified = True
+
+
+def drop_cookie_from_vary(response):
+    """Remove Cookie from Vary without disturbing other values.
+
+    Flask adds Vary: Cookie whenever the session was read. Private book
+    images are the same for every user, and the changing session cookie
+    would otherwise invalidate their browser cache on each request.
+    """
+    vary = response.headers.get("Vary")
+    if not vary:
+        return
+    remaining = [
+        part.strip()
+        for part in vary.split(",")
+        if part.strip() and part.strip().lower() != "cookie"
+    ]
+    if remaining:
+        response.headers["Vary"] = ", ".join(remaining)
+    else:
+        response.headers.pop("Vary", None)
+
+
+class CatreadsSessionInterface(SecureCookieSessionInterface):
+    """Strip Vary: Cookie from privately cached image responses."""
+
+    def save_session(self, app, session, response):
+        super().save_session(app, session, response)
+        if request.endpoint == "book_image" or (
+            request.endpoint == "static"
+            and request.path.rsplit("/", 1)[-1].startswith("cover-")
+        ):
+            drop_cookie_from_vary(response)
+
+
+app.session_interface = CatreadsSessionInterface()
+
+
 @app.after_request
 def security_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -305,11 +357,13 @@ def security_headers(response):
         if request.path.rsplit("/", 1)[-1].startswith("cover-"):
             # Private browser caching keeps an index reload from re-fetching
             # hundreds of covers; shared caches still must not store them.
-            response.headers["Cache-Control"] = "private, max-age=86400"
-            response.vary.add("Cookie")
+            # No Vary: Cookie here or the changing session cookie would
+            # invalidate the cache entry on every request.
+            response.headers["Cache-Control"] = (
+                "private, max-age=86400, immutable"
+            )
     elif request.endpoint == "book_image":
-        response.headers["Cache-Control"] = "private, max-age=86400"
-        response.vary.add("Cookie")
+        response.headers["Cache-Control"] = "private, max-age=86400, immutable"
     else:
         response.headers.setdefault("Cache-Control", "no-store")
         response.vary.add("Cookie")
