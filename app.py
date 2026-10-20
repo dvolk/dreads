@@ -101,6 +101,10 @@ def load_secret_key(flask_app):
         return secrets.token_urlsafe(64)
 
 
+def env_flag(name):
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///reader.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
@@ -108,9 +112,7 @@ app.config["SECRET_KEY"] = load_secret_key(app)
 app.config["SESSION_COOKIE_NAME"] = "catreads_session"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = os.environ.get(
-    "CATREADS_HTTPS", ""
-).lower() in {"1", "true", "yes", "on"}
+app.config["SESSION_COOKIE_SECURE"] = env_flag("CATREADS_HTTPS")
 # Browsers cap cookie lifetime at 400 days, so this is the longest practical
 # "stay logged in" value. SESSION_REFRESH_EACH_REQUEST slides the expiry
 # forward on every visit, so an actively used session does not expire.
@@ -124,7 +126,10 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 99999999999
 # sanitized chapter body opts out explicitly with |safe.
 app.jinja_env.autoescape = True
 
-if os.environ.get("CATREADS_BEHIND_PROXY", "").lower() in {"1", "true", "yes", "on"}:
+PROXY_ENABLED = env_flag("CATREADS_BEHIND_PROXY")
+TRUSTED_PROXY = (os.environ.get("CATREADS_TRUSTED_PROXY") or "127.0.0.1").strip()
+
+if PROXY_ENABLED:
     # nginx terminates TLS and overwrites X-Forwarded-For itself, so trust
     # exactly one proxy hop for the client address and scheme. Do not trust
     # X-Forwarded-Host; nginx already sets Host to the vhost name.
@@ -1021,7 +1026,16 @@ def run_app(debug=False, interface="127.0.0.1"):
         app.run(host=interface, port=5438, debug=True)
     else:
         threading.Thread(target=load_books_thread, daemon=True).start()
-        waitress.serve(app, host=interface, port=5438)
+        waitress_options = {}
+        if PROXY_ENABLED:
+            # Waitress 3 clears X-Forwarded-* from untrusted peers. Trust only
+            # the local reverse proxy for the client address and scheme.
+            waitress_options = {
+                "trusted_proxy": TRUSTED_PROXY,
+                "trusted_proxy_count": 1,
+                "trusted_proxy_headers": "x-forwarded-for x-forwarded-proto",
+            }
+        waitress.serve(app, host=interface, port=5438, **waitress_options)
 
 
 def process_cover(book_id):

@@ -74,7 +74,8 @@ Environment variables:
 | Variable | Purpose |
 | --- | --- |
 | `CATREADS_SECRET_KEY` | Session signing key. Use at least 32 random characters. If absent or weak, `instance/secret_key` is used. |
-| `CATREADS_BEHIND_PROXY=1` | Trust one reverse-proxy hop for `X-Forwarded-For` / `X-Forwarded-Proto`. Required behind nginx, otherwise all clients look like `127.0.0.1` and rate limiting is shared. |
+| `CATREADS_BEHIND_PROXY=1` | Trust one reverse-proxy hop for `X-Forwarded-For` / `X-Forwarded-Proto`. Required behind nginx, otherwise Waitress clears those headers, all clients look like `127.0.0.1`, and rate limiting is shared. |
+| `CATREADS_TRUSTED_PROXY` | Address of the proxy Waitress should trust. Default `127.0.0.1`; use `::1` if nginx connects over IPv6. |
 | `CATREADS_HTTPS=1` | Mark the session cookie `Secure`. Required when TLS terminates at the proxy. |
 
 The proxy must terminate TLS, bind the app to loopback, and pass the real client
