@@ -65,6 +65,7 @@ The app can be the only authentication boundary. It now includes:
 * A strict CSP, `nosniff`, `DENY` framing, no-referrer, and no-index headers.
 * EPUB content is still sanitized with bleach; the CSP is a second line of defence.
 * Book covers require a session, so the library is not enumerable from `/static/`.
+* Covers and inline book images are `private, max-age=86400`, so reloads use the browser cache without letting shared caches retain them.
 * Unknown usernames take the same time to reject as wrong passwords.
 * A weak or missing `CATREADS_SECRET_KEY` is ignored; a persistent 0600 key is
   generated under `instance/secret_key` instead.
@@ -88,6 +89,31 @@ location / {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $remote_addr;
     proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+If you rate-limit at the proxy, give covers and book images their own
+high-burst zone. Loading an index fetches one cover per book, so the normal
+page limit will trip on a large library:
+
+```nginx
+limit_req_zone $binary_remote_addr zone=catreads_static:10m rate=50r/s;
+limit_req_zone $binary_remote_addr zone=catreads_pages:10m rate=2r/s;
+
+location /static/ {
+    limit_req zone=catreads_static burst=2000 nodelay;
+    proxy_pass http://127.0.0.1:5438;
+    # ... same proxy headers as above ...
+}
+location /book_images/ {
+    limit_req zone=catreads_static burst=2000 nodelay;
+    proxy_pass http://127.0.0.1:5438;
+    # ... same proxy headers as above ...
+}
+location / {
+    limit_req zone=catreads_pages burst=500 nodelay;
+    proxy_pass http://127.0.0.1:5438;
+    # ... same proxy headers as above ...
 }
 ```
 

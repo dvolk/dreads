@@ -259,6 +259,9 @@ def run_tests(client, book_id, user_id):
     r = client.get(img_src)
     assert r.status_code == 200, f"image route: {r.status_code}"
     assert r.content_type.startswith("image/"), f"content type: {r.content_type}"
+    assert r.headers.get("Cache-Control") == "private, max-age=86400", (
+        "book images should be privately cacheable"
+    )
     anon = app.test_client()
     r = anon.get(img_src)
     assert r.status_code in (302, 303), "anonymous image access should redirect"
@@ -427,8 +430,10 @@ def run_tests(client, book_id, user_id):
         assert anon.get(cover_url).status_code == 404, (
             "anonymous cover access should be hidden"
         )
-        assert client.get(cover_url).status_code == 200, (
-            "authenticated cover access should work"
+        r = client.get(cover_url)
+        assert r.status_code == 200, "authenticated cover access should work"
+        assert r.headers.get("Cache-Control") == "private, max-age=86400", (
+            "covers should be privately cacheable"
         )
 
     # --- crawlers are told to stay out, on both the app and the headers ---

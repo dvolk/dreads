@@ -303,7 +303,13 @@ def security_headers(response):
         )
     if request.endpoint == "static":
         if request.path.rsplit("/", 1)[-1].startswith("cover-"):
-            response.headers["Cache-Control"] = "private, no-store"
+            # Private browser caching keeps an index reload from re-fetching
+            # hundreds of covers; shared caches still must not store them.
+            response.headers["Cache-Control"] = "private, max-age=86400"
+            response.vary.add("Cookie")
+    elif request.endpoint == "book_image":
+        response.headers["Cache-Control"] = "private, max-age=86400"
+        response.vary.add("Cookie")
     else:
         response.headers.setdefault("Cache-Control", "no-store")
         response.vary.add("Cookie")
